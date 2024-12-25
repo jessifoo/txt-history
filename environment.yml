@@ -1,0 +1,10 @@
+name: txt-history
+prefix: /Users/jessicajohnson/miniconda3/envs/txt-history
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip  # If you need pip for any additional packages
+  # Add any external libraries below
+  # - some_external_package
