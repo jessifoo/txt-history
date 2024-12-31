@@ -1,10 +1,39 @@
 name: txt-history
-prefix: /Users/jessicajohnson/miniconda3/envs/txt-history
 channels:
   - conda-forge
   - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
 dependencies:
-  - python=3.8
-  - pip  # If you need pip for any additional packages
-  # Add any external libraries below
-  # - some_external_package
+  - bzip2=1.0.8=h80987f9_6
+  - ca-certificates=2024.12.14=hf0a4a13_0
+  - coverage=7.6.9=py311h80987f9_0
+  - exceptiongroup=1.2.0=py311hca03da5_0
+  - expat=2.6.4=h313beb8_0
+  - iniconfig=1.1.1=pyhd3eb1b0_0
+  - libcxx=14.0.6=h848a8c0_0
+  - libffi=3.4.4=hca03da5_1
+  - libmpdec=4.0.0=h80987f9_0
+  - libsqlite=3.46.0=hfb93653_0
+  - libzlib=1.2.13=hfb2fe0b_6
+  - ncurses=6.5=h7bae524_1
+  - openssl=3.4.0=h39f12f2_0
+  - packaging=24.2=py311hca03da5_0
+  - pip=24.3.1=pyh8b19718_0
+  - pluggy=1.5.0=py311hca03da5_0
+  - pytest=7.4.4=py311hca03da5_0
+  - pytest-asyncio=0.21.2=py311hca03da5_0
+  - pytest-cov=6.0.0=py311hca03da5_0
+  - python=3.11.11=hb885b13_0
+  - python_abi=3.11=2_cp311
+  - readline=8.2=h1a28f6b_0
+  - setuptools=75.3.0=pyhd8ed1ab_0
+  - sqlite=3.45.3=h80987f9_0
+  - tk=8.6.14=h6ba3021_0
+  - toml=0.10.2=pyhd3eb1b0_0
+  - tomli=2.0.1=py311hca03da5_0
+  - tzdata=2024b=h04d1e81_0
+  - wheel=0.45.1=pyhd8ed1ab_0
+  - xz=5.4.6=h80987f9_1
+  - zlib=1.2.13=hfb2fe0b_6
+prefix: /Users/jessicajohnson/miniconda3/envs/txt-history

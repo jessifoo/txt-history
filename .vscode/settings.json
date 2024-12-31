@@ -1,0 +1,34 @@
+{
+    "terminal.integrated.cwd": "/Users/jessicajohnson/PycharmProjects/txt-history",
+    "terminal.integrated.shellIntegration.enabled": true,
+    "terminal.integrated.defaultProfile.osx": "zsh (2)",
+    "terminal.integrated.profiles.osx": {
+
+        "bash": {
+            "path": "bash",
+            "args": [
+                "-l"
+            ],
+            "icon": "terminal-bash"
+        },
+        "zsh": {
+            "path": "zsh",
+            "args": [
+                "-l"
+            ]
+        },
+        "tmux": {
+            "path": "tmux",
+            "icon": "terminal-tmux"
+        },
+        "pwsh": {
+            "path": "pwsh",
+            "icon": "terminal-powershell"
+        }
+    },
+    "sonarlint.connectedMode.project": {
+        "connectionId": "jessifoo",
+        "projectKey": "jessifoo_txt-history"
+    },
+    "python.testing.cwd": "/Users/jessicajohnson/PycharmProjects/txt-history/tests"
+}
