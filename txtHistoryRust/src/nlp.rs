@@ -3,9 +3,9 @@ use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use stop_words::{get, LANGUAGE};
+use stop_words::{LANGUAGE, get};
 use unicode_normalization::UnicodeNormalization;
-use whatlang::{detect, Lang};
+use whatlang::{Lang, detect};
 
 use crate::db::Database;
 use crate::models::{DbMessage, DbProcessedMessage, NamedEntity, NewProcessedMessage, NlpAnalysis};
@@ -31,10 +31,7 @@ impl NlpProcessor {
         let extra_spaces_regex = Regex::new(r"\s+").unwrap();
 
         // Initialize stopwords for English
-        let stopwords: HashSet<String> = get(LANGUAGE::English)
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let stopwords: HashSet<String> = get(LANGUAGE::English).iter().map(|s| s.to_string()).collect();
 
         // Initialize stemmer for English
         let stemmer = Stemmer::create(Algorithm::English);
@@ -107,11 +104,7 @@ impl NlpProcessor {
 
     /// Lemmatize/stem the tokens
     fn lemmatize(&self, tokens: &[String]) -> String {
-        tokens
-            .iter()
-            .map(|token| self.stemmer.stem(token))
-            .collect::<Vec<_>>()
-            .join(" ")
+        tokens.iter().map(|token| self.stemmer.stem(token)).collect::<Vec<_>>().join(" ")
     }
 
     /// Extract named entities from text (simplified implementation)
@@ -126,14 +119,14 @@ impl NlpProcessor {
                 // Simple rule-based entity extraction for demonstration
                 // Look for capitalized words that might be names
                 let words: Vec<&str> = text.split_whitespace().collect();
-                
+
                 for (i, word) in words.iter().enumerate() {
                     if !word.is_empty() && word.chars().next().unwrap().is_uppercase() {
                         // Skip common sentence starters
                         if i > 0 || !["I", "The", "A", "An", "This", "That"].contains(word) {
                             let start_pos = text.find(word).unwrap_or(0);
                             let end_pos = start_pos + word.len();
-                            
+
                             entities.push(NamedEntity {
                                 text: word.to_string(),
                                 entity_type: "PERSON".to_string(), // Simplified
@@ -153,23 +146,44 @@ impl NlpProcessor {
     fn analyze_sentiment(&self, text: &str) -> f32 {
         // This is a very simplified implementation
         // In a real-world scenario, you would use a proper sentiment analysis model
-        
+
         // Define simple positive and negative word lists
         let positive_words = [
-            "good", "great", "excellent", "amazing", "wonderful", "fantastic",
-            "happy", "joy", "love", "like", "best", "better", "awesome",
+            "good",
+            "great",
+            "excellent",
+            "amazing",
+            "wonderful",
+            "fantastic",
+            "happy",
+            "joy",
+            "love",
+            "like",
+            "best",
+            "better",
+            "awesome",
         ];
-        
+
         let negative_words = [
-            "bad", "terrible", "awful", "horrible", "worst", "hate",
-            "dislike", "poor", "disappointing", "sad", "angry", "upset",
+            "bad",
+            "terrible",
+            "awful",
+            "horrible",
+            "worst",
+            "hate",
+            "dislike",
+            "poor",
+            "disappointing",
+            "sad",
+            "angry",
+            "upset",
         ];
-        
+
         // Count positive and negative words
         let words: Vec<&str> = text.split_whitespace().collect();
         let positive_count = words.iter().filter(|w| positive_words.contains(w)).count() as f32;
         let negative_count = words.iter().filter(|w| negative_words.contains(w)).count() as f32;
-        
+
         // Calculate sentiment score (-1.0 to 1.0)
         if positive_count == 0.0 && negative_count == 0.0 {
             0.0 // Neutral
@@ -192,7 +206,8 @@ impl NlpProcessor {
             }
 
             // Get the message from the database
-            let message = db.get_message_by_id(message_id)?
+            let message = db
+                .get_message_by_id(message_id)?
                 .context(format!("Message with ID {} not found", message_id))?;
 
             // Skip messages without text
@@ -222,24 +237,24 @@ mod tests {
     #[test]
     fn test_clean_text() {
         let processor = NlpProcessor::new("test_v1");
-        
+
         // Test URL removal
         let text_with_url = "Check out https://example.com for more info";
         let cleaned = processor.clean_text(text_with_url);
         assert!(!cleaned.contains("https://"));
-        
+
         // Test emoji removal
         let text_with_emoji = "I love this 😍";
         let cleaned = processor.clean_text(text_with_emoji);
         assert!(!cleaned.contains("😍"));
-        
+
         // Test special character handling
         let text_with_special = "Hello, world! How are you?";
         let cleaned = processor.clean_text(text_with_special);
         assert!(!cleaned.contains(","));
         assert!(!cleaned.contains("!"));
         assert!(!cleaned.contains("?"));
-        
+
         // Test whitespace normalization
         let text_with_spaces = "  Too   many    spaces   ";
         let cleaned = processor.clean_text(text_with_spaces);
@@ -249,16 +264,16 @@ mod tests {
     #[test]
     fn test_tokenize() {
         let processor = NlpProcessor::new("test_v1");
-        
+
         let text = "this is a test sentence with stopwords";
         let tokens = processor.tokenize(text);
-        
+
         // Stopwords like "this", "is", "a", "with" should be removed
         assert!(!tokens.contains(&"this".to_string()));
         assert!(!tokens.contains(&"is".to_string()));
         assert!(!tokens.contains(&"a".to_string()));
         assert!(!tokens.contains(&"with".to_string()));
-        
+
         // Content words should remain
         assert!(tokens.contains(&"test".to_string()));
         assert!(tokens.contains(&"sentence".to_string()));
@@ -268,17 +283,17 @@ mod tests {
     #[test]
     fn test_sentiment_analysis() {
         let processor = NlpProcessor::new("test_v1");
-        
+
         // Positive text
         let positive_text = "I love this product it's amazing and wonderful";
         let positive_score = processor.analyze_sentiment(positive_text);
         assert!(positive_score > 0.0);
-        
+
         // Negative text
         let negative_text = "This is terrible and I hate it";
         let negative_score = processor.analyze_sentiment(negative_text);
         assert!(negative_score < 0.0);
-        
+
         // Neutral text
         let neutral_text = "The sky is blue and the grass is green";
         let neutral_score = processor.analyze_sentiment(neutral_text);

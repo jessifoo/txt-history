@@ -26,22 +26,11 @@ deny = [
   "clippy::needless_pass_by_value",
   "clippy::option_option",
   "clippy::result_map_unwrap_or_else",
-]
-
-# Warn on other lints
-warn = [
-  "clippy::all",
-  "clippy::pedantic",
-  "clippy::nursery",
-  "clippy::cargo",
   "clippy::complexity",
   "clippy::correctness",
   "clippy::perf",
   "clippy::style",
   "clippy::suspicious",
-  "clippy::doc_markdown",
-  "clippy::missing_errors_doc",
-  "clippy::missing_panics_doc",
   "clippy::must_use_candidate",
   "clippy::clone_on_ref_ptr",
   "clippy::cognitive_complexity",
@@ -59,8 +48,22 @@ warn = [
   "clippy::needless_for_each",
 ]
 
+# Warn on other lints
+warn = [
+  "clippy::all",
+  "clippy::pedantic",
+  "clippy::nursery",
+  "clippy::cargo",
+  "clippy::doc_markdown",
+  "clippy::missing_errors_doc",
+  "clippy::missing_panics_doc",
+]
+
 # Configure specific lints
 cognitive-complexity-threshold = 15
 type-complexity-threshold = 250
 too-many-arguments-threshold = 5
 too-many-lines-threshold = 100
+
+# The following lints are configured via rustfmt or .cargo/config.toml
+# This file is just for Clippy-specific configuration

@@ -1,15 +1,11 @@
-use std::path::{Path, PathBuf};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{Local, TimeZone};
 use imessage_database::{
-    tables::{
-        chat::Chat,
-        handle::Handle,
-        message::Message as ImessageMessage,
-    },
     IMessageChat, IMessageDb,
+    tables::{chat::Chat, handle::Handle, message::Message as ImessageMessage},
 };
+use std::path::{Path, PathBuf};
 
 use crate::models::{Contact, DateRange, Message, OutputFormat};
 
@@ -18,13 +14,8 @@ pub trait MessageRepository {
     async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>>;
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()>;
     async fn export_conversation_by_person(
-        &self,
-        person_name: &str,
-        format: OutputFormat,
-        output_path: &Path,
-        date_range: &DateRange,
-        chunk_size: Option<usize>,
-        lines_per_chunk: Option<usize>
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<usize>,
+        lines_per_chunk: Option<usize>,
     ) -> Result<Vec<PathBuf>>;
 }
 
@@ -36,8 +27,7 @@ pub struct IMessageDatabaseRepo {
 impl IMessageDatabaseRepo {
     pub fn new(chat_db_path: PathBuf) -> Result<Self> {
         // Initialize iMessage database
-        let db = IMessageDb::new(chat_db_path)
-            .map_err(|e| anyhow::anyhow!("Failed to initialize iMessage database: {}", e))?;
+        let db = IMessageDb::new(chat_db_path).map_err(|e| anyhow::anyhow!("Failed to initialize iMessage database: {}", e))?;
 
         // Initialize our database
         let database = Database::new("sqlite:data/messages.db")?;
@@ -190,11 +180,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                 // Skip messages without text
                 if let Some(text) = msg.text {
                     // Determine sender name
-                    let sender = if msg.is_from_me {
-                        "Jess".to_string()
-                    } else {
-                        contact.name.clone()
-                    };
+                    let sender = if msg.is_from_me { "Jess".to_string() } else { contact.name.clone() };
 
                     // Convert date
                     let timestamp = Local.from_utc_datetime(&msg.date);
@@ -212,22 +198,14 @@ impl MessageRepository for IMessageDatabaseRepo {
                     let new_message = NewMessage {
                         imessage_id: msg.guid,
                         text: msg.text,
-                        sender: if msg.is_from_me {
-                            "Jess".to_string()
-                        } else {
-                            contact.name.clone()
-                        },
+                        sender: if msg.is_from_me { "Jess".to_string() } else { contact.name.clone() },
                         is_from_me: msg.is_from_me,
                         date_created: msg.date,
                         handle_id: Some(handle.id.clone()),
                         service: msg.service,
                         thread_id: Some(chat.chat_identifier.clone()),
                         has_attachments: !msg.attachments.is_empty(),
-                        contact_id: if msg.is_from_me {
-                            Some(me_contact.id)
-                        } else {
-                            Some(db_contact.id)
-                        },
+                        contact_id: if msg.is_from_me { Some(me_contact.id) } else { Some(db_contact.id) },
                     };
 
                     // Add to database
@@ -260,7 +238,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                         message.content
                     )?;
                 }
-            }
+            },
             OutputFormat::Csv => {
                 let file = std::fs::File::create(path)?;
                 let mut writer = csv::Writer::from_writer(file);
@@ -278,7 +256,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                 }
 
                 writer.flush()?;
-            }
+            },
         }
 
         Ok(())
@@ -286,13 +264,8 @@ impl MessageRepository for IMessageDatabaseRepo {
 
     // Export conversation with a person in the specified format
     async fn export_conversation_by_person(
-        &self,
-        person_name: &str,
-        format: OutputFormat,
-        output_path: &Path,
-        date_range: &DateRange,
-        chunk_size: Option<usize>,
-        lines_per_chunk: Option<usize>
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<usize>,
+        lines_per_chunk: Option<usize>,
     ) -> Result<Vec<PathBuf>> {
         // Get all messages with this person
         let messages = self.database.get_conversation_with_person(
@@ -318,10 +291,7 @@ impl MessageRepository for IMessageDatabaseRepo {
         // Determine how to chunk the messages
         let chunks = if let Some(lines) = lines_per_chunk {
             // Chunk by number of messages
-            messages
-                .chunks(lines)
-                .map(|chunk| chunk.to_vec())
-                .collect::<Vec<_>>()
+            messages.chunks(lines).map(|chunk| chunk.to_vec()).collect::<Vec<_>>()
         } else if let Some(size_mb) = chunk_size {
             // Chunk by approximate size in MB
             let bytes_per_mb = 1024 * 1024;
@@ -360,9 +330,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
         for (i, chunk) in chunks.iter().enumerate() {
             let chunk_number = i + 1;
-            let file_stem = output_path.file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("conversation");
+            let file_stem = output_path.file_stem().and_then(|s| s.to_str()).unwrap_or("conversation");
 
             let file_name = if chunks.len() > 1 {
                 format!("{}_chunk_{}", file_stem, chunk_number)

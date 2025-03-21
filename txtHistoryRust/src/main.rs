@@ -1,15 +1,15 @@
 mod db;
 mod models;
+mod nlp;
 mod repository;
 mod schema;
-mod nlp;
 
-use std::path::PathBuf;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime};
 use clap::{Parser, Subcommand};
 use imessage_database::util::dirs;
 use repository::IMessageDatabaseRepo;
+use std::path::PathBuf;
 
 use crate::db::Database;
 use crate::models::{Contact, DateRange, OutputFormat};
@@ -157,9 +157,7 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => {
-            import_messages(name, start_date, end_date, format, *size, *lines, output_dir)
-        }
+        } => import_messages(name, start_date, end_date, format, *size, *lines, output_dir),
         Commands::Query {
             name,
             start_date,
@@ -168,9 +166,7 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => {
-            query_messages(&db, name, start_date, end_date, format, *size, *lines, output_dir)
-        }
+        } => query_messages(&db, name, start_date, end_date, format, *size, *lines, output_dir),
         Commands::ExportByPerson {
             name,
             start_date,
@@ -178,9 +174,7 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => {
-            export_conversation_by_person(&db, name, start_date, end_date, *size, *lines, output_dir).await?
-        }
+        } => export_conversation_by_person(&db, name, start_date, end_date, *size, *lines, output_dir).await?,
         Commands::Process {
             version,
             name,
@@ -188,25 +182,17 @@ async fn main() -> Result<()> {
             end_date,
             batch_size,
             stats,
-        } => {
-            process_messages(&db, version, name, start_date, end_date, *batch_size, *stats)
-        }
+        } => process_messages(&db, version, name, start_date, end_date, *batch_size, *stats),
     }
 }
 
 /// Import messages from iMessage database
 fn import_messages(
-    name: &str,
-    start_date: &Option<String>,
-    end_date: &Option<String>,
-    format: &str,
-    size: Option<f64>,
-    lines: Option<usize>,
+    name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>, lines: Option<usize>,
     output_dir: &str,
 ) -> Result<()> {
     // Get iMessage database path
-    let chat_db_path = dirs::get_imessage_chat_db_path()
-        .context("Failed to locate iMessage database")?;
+    let chat_db_path = dirs::get_imessage_chat_db_path().context("Failed to locate iMessage database")?;
 
     println!("Using iMessage database at: {}", chat_db_path.display());
 
@@ -248,14 +234,8 @@ fn import_messages(
 
 /// Query messages from the database
 fn query_messages(
-    db: &Database,
-    name: &str,
-    start_date: &Option<String>,
-    end_date: &Option<String>,
-    format: &str,
-    size: Option<f64>,
-    lines: Option<usize>,
-    output_dir: &str,
+    db: &Database, name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>,
+    lines: Option<usize>, output_dir: &str,
 ) -> Result<()> {
     // Get contact
     let contact_info = match db.get_contact(name)? {
@@ -302,39 +282,36 @@ fn query_messages(
 
 /// Export conversation with a specific person
 async fn export_conversation_by_person(
-    db: &Database,
-    name: &str,
-    start_date: &Option<String>,
-    end_date: &Option<String>,
-    size_mb: Option<f64>,
-    lines_per_chunk: Option<usize>,
-    output_dir: &str,
+    db: &Database, name: &str, start_date: &Option<String>, end_date: &Option<String>, size_mb: Option<f64>,
+    lines_per_chunk: Option<usize>, output_dir: &str,
 ) -> Result<()> {
     println!("Exporting conversation with {}", name);
-    
+
     // Create output directory if it doesn't exist
     std::fs::create_dir_all(output_dir)?;
-    
+
     // Parse date range
     let date_range = parse_date_range(start_date, end_date)?;
-    
+
     // Create repository
     let chat_db_path = dirs::chat_db_path().context("Failed to get iMessage database path")?;
     let repo = IMessageDatabaseRepo::new(chat_db_path)?;
-    
+
     // Create output path
     let output_path = std::path::Path::new(output_dir).join(format!("{}_conversation", name));
-    
+
     // Export conversation
-    let output_files = repo.export_conversation_by_person(
-        name,
-        OutputFormat::Txt, // This is ignored as both formats are created
-        &output_path,
-        &date_range,
-        size_mb.map(|s| s as usize),
-        lines_per_chunk,
-    ).await?;
-    
+    let output_files = repo
+        .export_conversation_by_person(
+            name,
+            OutputFormat::Txt, // This is ignored as both formats are created
+            &output_path,
+            &date_range,
+            size_mb.map(|s| s as usize),
+            lines_per_chunk,
+        )
+        .await?;
+
     if output_files.is_empty() {
         println!("No messages found for {} in the specified date range", name);
     } else {
@@ -343,18 +320,13 @@ async fn export_conversation_by_person(
             println!("  - {}", file.display());
         }
     }
-    
+
     Ok(())
 }
 
 /// Process messages with NLP
 fn process_messages(
-    db: &Database,
-    version: &str,
-    name: &Option<String>,
-    start_date: &Option<String>,
-    end_date: &Option<String>,
-    batch_size: usize,
+    db: &Database, version: &str, name: &Option<String>, start_date: &Option<String>, end_date: &Option<String>, batch_size: usize,
     show_stats: bool,
 ) -> Result<()> {
     // Create NLP processor
@@ -396,10 +368,10 @@ fn process_messages(
     for chunk in message_ids.chunks(batch_size) {
         let batch_ids = chunk.to_vec();
         let batch_size = batch_ids.len();
-        
+
         println!("Processing batch of {} messages...", batch_size);
         let processed = processor.process_messages(db, &batch_ids)?;
-        
+
         processed_count += processed.len();
         println!("Processed {}/{} messages", processed_count, total_messages);
     }
@@ -451,18 +423,15 @@ fn get_contact_info(name: &str) -> Result<Contact> {
             return Err(anyhow::anyhow!(
                 "Contact not found: {}. Available contacts: Jess, Phil, Robert, Rhonda, Sherry",
                 name
-            ))
-        }
+            ));
+        },
     };
 
     Ok(contact)
 }
 
 /// Parse date range from string options
-fn parse_date_range(
-    start_date: &Option<String>,
-    end_date: &Option<String>,
-) -> Result<DateRange> {
+fn parse_date_range(start_date: &Option<String>, end_date: &Option<String>) -> Result<DateRange> {
     let start = if let Some(date_str) = start_date {
         Some(
             DateTime::parse_from_str(&format!("{} 00:00:00 +0000", date_str), "%Y-%m-%d %H:%M:%S %z")
@@ -488,11 +457,7 @@ fn parse_date_range(
 
 /// Write messages to files with chunking
 fn write_messages_to_files(
-    messages: &[models::Message],
-    format: OutputFormat,
-    size_mb: Option<f64>,
-    lines_per_chunk: Option<usize>,
-    output_dir: &str,
+    messages: &[models::Message], format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>, output_dir: &str,
 ) -> Result<()> {
     if messages.is_empty() {
         println!("No messages to write");
@@ -532,12 +497,12 @@ fn write_messages_to_files(
                 let file_path = format!("{}.txt", file_base);
                 write_txt_file(chunk, &file_path)?;
                 println!("Wrote {} messages to {}", chunk.len(), file_path);
-            }
+            },
             OutputFormat::Csv => {
                 let file_path = format!("{}.csv", file_base);
                 write_csv_file(chunk, &file_path)?;
                 println!("Wrote {} messages to {}", chunk.len(), file_path);
-            }
+            },
         }
     }
 
