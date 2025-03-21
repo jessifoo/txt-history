@@ -1,34 +1,63 @@
 {
-    "terminal.integrated.cwd": "/Users/jessicajohnson/PycharmProjects/txt-history",
-    "terminal.integrated.shellIntegration.enabled": true,
-    "terminal.integrated.defaultProfile.osx": "zsh (2)",
-    "terminal.integrated.profiles.osx": {
-
-        "bash": {
-            "path": "bash",
-            "args": [
-                "-l"
-            ],
-            "icon": "terminal-bash"
-        },
-        "zsh": {
-            "path": "zsh",
-            "args": [
-                "-l"
-            ]
-        },
-        "tmux": {
-            "path": "tmux",
-            "icon": "terminal-tmux"
-        },
-        "pwsh": {
-            "path": "pwsh",
-            "icon": "terminal-powershell"
-        }
+  "terminal.integrated.cwd": "/Users/jessicajohnson/projects/cascade/CascadeProjects/txt-history/",
+  "sonarlint.connectedMode.project": {
+    "connectionId": "jessifoo",
+    "projectKey": "jessifoo_txt-history"
+  },
+  "python.testing.cwd": "/Users/jessicajohnson/projects/cascade/CascadeProjects/txt-history/tests/",
+  "files.autoSave": "afterDelay",
+  "editor.wordWrap": "wordWrapColumn",
+  "windsurf.enableModelBasedAutoExecution": true,
+  "php.validate.enable": true,
+  "php.suggest.basic": true,
+  "php.validate.run": "onType",
+  "python.createEnvironment.contentButton": "show",
+  "python.languageServer": "None",
+  "python.missingPackage.severity": "Error",
+  "python.terminal.activateEnvInCurrentTerminal": true,
+  "python.terminal.executeInFileDir": true,
+  "python.terminal.shellIntegration.enabled": true,
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": true,
+  "debugpy.showPythonInlineValues": true,
+  "redHatDependencyAnalytics.usePipDepTree": true,
+  "redHatDependencyAnalytics.usePythonVirtualEnvironment": true,
+  "redHatDependencyAnalytics.vulnerabilityAlertSeverity": "Warning",
+  "editor.codeActionsOnSave": {
+    "source.organizeImports.ruff": "explicit",
+    "source.fixAll.ruff": "explicit",
+    "source.sort.json": "explicit",
+    "source.quickfix": "explicit"
+  },
+  "editor.codeActionWidget.includeNearbyQuickFixes": true,
+  "editor.detectIndentation": true,
+  "editor.formatOnSave": true,
+  "editor.largeFileOptimizations": true,
+  "editor.renderWhitespace": "all",
+  "editor.showDeprecated": true,
+  "editor.showUnused": true,
+  "[python]": {
+    "editor.formatOnSave": true,
+    "diffEditor.codeLens": true,
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "[json]": {
+    "editor.quickSuggestions": {
+      "strings": true
     },
-    "sonarlint.connectedMode.project": {
-        "connectionId": "jessifoo",
-        "projectKey": "jessifoo_txt-history"
-    },
-    "python.testing.cwd": "/Users/jessicajohnson/PycharmProjects/txt-history/tests"
+    "editor.suggest.insertMode": "replace",
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "never"
+    }
+  },
+  "outline.showMethods": true,
+  "python.poetryPath": "poetry",
+  "python.analysis.typeCheckingMode": "basic",
+  "python.linting.enabled": true,
+  "ruff.interpreter": ["${workspaceFolder}/.venv/bin/python"],
+  "python.formatting.provider": "charliermarsh.ruff"
 }

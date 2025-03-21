@@ -1,0 +1,64 @@
+This is a script: format_txt_history_full.py which runs on cli 
+it automatically spins up a venv and installs requirements.py
+it cleans up the venv at the end 
+
+it is run by
+
+```Bash
+python3 format_txt_history_full.py -s 0.5 -d "2024-01-01" -l 500 -n "Robert"
+
+-s: size (mb) per chunk
+-d: date
+-l: lines per chunk (this or -s, not both)
+-n: name
+
+```
+All are optional and if none are supplied only the name "Phil" is used by default
+
+This means it will lool up phil's phone number and then search imessage_exporter by using both his phone number and his email
+
+it will then format the messages and remove anything I don't want from imessage layout such that the result is:
+
+Sender (my number is always changed to Jess), Datetime, Message
+
+I expect to get a txt file with a line space between each row
+and a csv file of the same name with no line spacing
+
+example
+
+chunk_1.txt
+```Bash
+
+Phil, Jan 20, 2025 12:21:19 PM, Yea, I’ll have to go to bed earlier
+
+Jess, Jan 20, 2025 12:22:28 PM, When she’s healthy, she doesn’t wake up, I don’t know if she’s getting sick, but in general let her work on falling back to sleep herself. Robert and Roxanne did it, I’m sure we can too
+
+Phil, Jan 20, 2025  2:26:27 PM, Are you picking up Everly?
+
+Jess, Jan 20, 2025  2:26:36 PM, Yes
+
+Phil, Jan 20, 2025  3:43:40 PM, I’m going to stop by the barber to get my hair cut, then I’ll come home. How’s Everly doing?
+
+Phil, Jan 20, 2025  3:56:56 PM, Barber was busy, coming home now
+
+Jess, Jan 20, 2025  8:35:08 PM, I like how she was the one who initiated her bedtime routine with the reading kind of - it was you that could tell that’s what she wanted and that is phenomenal attunement, you’re impressively good at it when you let yourself be. She’s done that before and I haven’t taken it as seriously but I want to be better at that. She’s actually a fairly responsible and intuitive baby haha
+
+Phil, Jan 20, 2025  8:37:09 PM, Haha yea it feels good when it’s effortless
+
+Jess, Jan 20, 2025 11:52:58 PM, Apparently my payment didn’t go through, Can I borrow $300 to meet my overdue payment and I need to pay my car insurance. I’m sorry. I don’t know how this happened
+
+Phil, Jan 20, 2025 11:53:31 PM, 300 total?
+
+Jess, Jan 20, 2025 11:53:58 PM, Yes, $200 to get access to my insurance account again and pay the overdue amount and then $95 or something for registration before end of the month
+
+Jess, Jan 20, 2025 11:54:14 PM, Meant registration first time
+
+Phil, Jan 20, 2025 11:55:09 PM, Sent
+```
+
+Do not change the phone numbers that are in the script, ever
+do not change how the imessage_exporter command is run with it's specific arguments
+Do not change the expected output files
+
+Optimize the way we get from the input cli command to the output files
+Think step by step and show your reasoning, explain to me why you are making the change you are making and teach it to me so I understand

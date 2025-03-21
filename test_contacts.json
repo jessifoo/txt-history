@@ -1,0 +1,40 @@
+{
+  "contacts": {
+    "Phil": {
+      "name": "Phil",
+      "phone": "+18673335566",
+      "email": "apple@phil-g.com",
+      "metadata": {
+        "type": "default",
+        "created_at": "2025-02-22 23:44:37.860736",
+        "last_used": "2025-02-22 23:45:03.954925"
+      }
+    },
+    "Robert": {
+      "name": "Robert",
+      "phone": "+17806793467",
+      "email": null,
+      "metadata": null
+    },
+    "Rhonda": {
+      "name": "Rhonda",
+      "phone": "+17803944504",
+      "email": null,
+      "metadata": null
+    },
+    "Sherry": {
+      "name": "Sherry",
+      "phone": "+17807223445",
+      "email": null,
+      "metadata": null
+    },
+    "Jess": {
+      "name": "Jess",
+      "phone": "Jess",
+      "email": null,
+      "metadata": null
+    }
+  },
+  "version": "1.0",
+  "last_updated": "2025-02-22 23:45:03.954953"
+}

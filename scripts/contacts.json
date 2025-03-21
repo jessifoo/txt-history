@@ -1,0 +1,62 @@
+{
+  "contacts": {
+    "Jess": {
+      "email": null,
+      "metadata": null,
+      "name": "Jess",
+      "phone": "Jess"
+    },
+    "Karly": {
+      "email": null,
+      "metadata": null,
+      "name": "Karly",
+      "phone": "+17802662377"
+    },
+    "Phil": {
+      "email": "apple@phil-g.com",
+      "metadata": {
+        "created_at": "2025-02-22 22:44:26.471446",
+        "last_used": "2025-02-22 22:44:26.473783",
+        "type": "default"
+      },
+      "name": "Phil",
+      "phone": "+18673335566"
+    },
+    "Rhonda": {
+      "email": null,
+      "metadata": null,
+      "name": "Rhonda",
+      "phone": "+17803944504"
+    },
+    "Robert": {
+      "email": null,
+      "metadata": null,
+      "name": "Robert",
+      "phone": "+17806793467"
+    },
+    "Sherry": {
+      "email": null,
+      "metadata": null,
+      "name": "Sherry",
+      "phone": "+17807223445"
+    },
+    "karly": {
+      "name": "karly",
+      "phone": "+17802662377",
+      "email": null,
+      "metadata": {
+        "type": "regular",
+        "created_at": "2025-03-06 01:52:08.084322",
+        "last_used": "2025-03-06 01:52:08.084328"
+      }
+    },
+    "Roxanne": {
+      "email": null,
+      "metadata": null,
+      "name": "Roxanne",
+      "phone": "+15873388979"
+    }
+  },
+  "last_updated": "2025-03-21 02:46:52.728649",
+  "version": "1.0"
+}

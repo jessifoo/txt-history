@@ -1,0 +1,31 @@
+[build]
+rustflags = [
+    # Clippy lints
+    "-Dclippy::all",
+    "-Dclippy::pedantic",
+    "-Wclippy::nursery",
+    
+    # Additional lints
+    "-Drust_2018_idioms",
+    "-Dunused_qualifications",
+    "-Dwarnings",
+    
+    # Safety lints
+    "-Dunsafe_code",
+    "-Dmissing_docs",
+    "-Dunreachable_pub",
+    
+    # Performance lints
+    "-Dnonstandard_style",
+    "-Dfuture_incompatible",
+    
+    # Documentation lints
+    "-Dmissing_debug_implementations",
+    "-Dmissing_copy_implementations",
+]
+
+[target.'cfg(debug_assertions)'.build]
+rustflags = ["-Dwarnings"]
+
+[target.'cfg(not(debug_assertions))'.build]
+rustflags = ["-Dwarnings", "-Dclippy::all", "-Dclippy::pedantic"]

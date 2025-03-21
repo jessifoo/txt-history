@@ -1,110 +1,83 @@
-# Text Message History Formatter
+# Message History Formatter
 
-This project processes and formats text message history exports from iMessage. It handles messages from various senders and formats them consistently for better readability and analysis.
+This tool formats iMessage history into CSV and TXT files with specific formatting.
 
-## Features
-
-- Processes iMessage exports into a structured format
-- Normalizes phone numbers and maps them to contact names based on a configurable mapping
-- Handles both phone numbers and email addresses for contacts (e.g., Phil's email)
-- Preserves specific sender names (e.g., "Jess") while mapping others to their contact names
-- Splits output into manageable chunks for better handling
-
-## Environment Setup
-
-1. Create and activate the conda environment:
-```bash
-conda env create -f environment.yml
-conda activate txt-history
+## Usage
+```
+cd ~/projects/cascade/CascadeProjects/txt-history
+poetry install
+poetry run format (args)
 ```
 
-2. Important: If you have pyenv installed, you may need to temporarily disable it to ensure conda's Python is used:
-```bash
-pyenv global system
+The output will look exactly like this (for the txt files, csv has no line between rows):
+```
+Jess, Jan 21, 2025 10:12:59 PM, I'm stuck on the toilet from trying to eat. I can't go to her if she wakes up. OMG this is the worst
+
+Phil, Jan 21, 2025 10:14:26 PM, I got it, I'm keeping an eye on the monitor
+
+Jess, Jan 21, 2025 10:15:29 PM, Was there a bag of clothes left on the porch?
 ```
 
-3. Verify you're using the correct Python:
+## Options
+
+- `-l`: num lines (this or chunk size, not both)
+- `-s`: Maximum file size in MB for chunks (default: 5.0)
+- `-d`: Start date in YYYY-MM-DD format
+- `-e`: End date in YYYY-MM-DD format
+- `-n`: Name to use for messages sent by the user (default: "Phil")
+
+## Quickstart
+
+Simply run:
 ```bash
-which python  # Should point to your conda environment's Python
-python --version  # Should show Python 3.11.x
+cd ~/projects/cascade/CascadeProjects/txt-history
+poetry install
+poetry run format (args)
 ```
 
-## Command line
+## Development Guidelines
 
-I want to be able to call:
+When contributing to this project, please use the following template for your code requests:
 
-    python3 format_txt_history_full.py -s 0.2 -d "2024-12-01"
-    
-with optional parameters:
-   -s (max chunk size in mb)
-   -d (date)
-   -m (name, defulat: Phil)
+```markdown
+# Code Request
 
-## Input Data Format from immesage-exporter (sample)
+1. Documentation: [Reference relevant sections of this README]
 
-```bash
-Dec 17, 2024  4:31:51 PM
-Jess
-Ohh ok 16 mins at 425
+2. Current Task:
+   - What needs to be done?
+   - Why is it needed?
 
-Dec 17, 2024 10:14:08 PM (Read by Jess after 11 seconds)
-apple@phil-g.com
-I can take the night shift today and you can sleep through until ~7am if that works for you. If you’d rather do the night shift I need to get ready for bed now
+3. Key Requirements:
+   - Must have: [critical features]
+   - Must not: [things to avoid/preserve]
 
-Dec 17, 2024 10:15:02 PM (Read by them after 2 seconds)
-Jess
-Sure I can set an alarm for 7 but if she wakes up in the next little bit I’ll still be up
+4. Example: [if applicable, show sample input/output]
 
-Dec 17, 2024 10:17:23 PM (Read by Jess after 5 seconds)
-apple@phil-g.com
-Ok message me when you’re laying down to sleep. Keep in mind that it may take me a bit longer than you to wake up from her crying depending on which sleep phase I am in, but I will hear it
+Additional Context: [only if something isn't covered in the README]
 ```
 
-## Output Dir Structure
+### Critical Requirements
 
-DATETIME/
-    - CHUNKS_CSV/
-        CHUNK_1.csv
-        CHUNK2.csv
-        ...
-    - CHUNKS_txt/
-        CHUNK_1.txt
-        CHUNK2.txt
-        ...
+1. **Interface Preservation**
+   - CLI interface must remain consistent
+   - Output format must match the example above exactly
+   - Privacy handling (phone number protection) must be maintained
 
-## Output Data Format (sample)
+2. **Core Functionality**
+   - iMessage exporter integration must not be modified
+   - Virtual environment handling must be preserved
+   - never change folder output structure:
+        datetime_full/chunks_csv/chunk_1.csv, etc.
+        datetime_full/chunks_txt/chunk_1.txt, etc.
+   - Both CSV and TXT outputs must be generated
 
-### chunk_1.txt
+3. **Data Privacy**
+   - Never modify or expose phone numbers
+   - Always replace user's number with "Jess", default is always "Phil"
+   - Maintain message privacy and security
 
-```bash
-Jess, Aug 30, 2024 10:42:49 PM, I totally forgot 
-
-Jess, Aug 31, 2024 12:33:42 AM, Look outside 
-
-Jess, Aug 31, 2024 12:33:46 AM, Go outside and look up 
-
-Jess, Aug 31, 2024 12:33:59 AM, Quick 
-
-Jess, Aug 31, 2024 12:34:49 AM, I’ve never in my life seen the northern lights this bright or this big or this magical lol 
-
-Rhonda, Aug 31, 2024 11:29:50 AM, Oh shit. I would have liked that. 
-
-Rhonda, Aug 31, 2024 11:30:34 AM, How’s packing?  If you need I can come by and watch her so you guys can get out of there 
-
-Jess, Aug 31, 2024 11:36:21 AM, Omg that would be so helpful 
-
-Jess, Aug 31, 2024 11:36:41 AM, She was up so much last night and is in a mood from all the hustle and bustle 
-```
-
-### chunk_1.csv
-
-```bash
-Jess,"Aug 30, 2024 10:42:49 PM","I totally forgot"
-Jess,"Aug 31, 2024 12:33:42 AM","Look outside"
-Jess,"Aug 31, 2024 12:33:46 AM","Go outside and look up"
-Jess,"Aug 31, 2024 12:33:59 AM","Quick"
-Jess,"Aug 31, 2024 12:34:49 AM","I’ve never in my life seen the northern lights this bright or this big or this magical lol"
-Rhonda,"Aug 31, 2024 11:29:50 AM","Oh shit. I would have liked that."
-Rhonda,"Aug 31, 2024 11:30:34 AM","How’s packing?  If you need I can come by and watch her so you guys can get out of there"
-Jess,"Aug 31, 2024 11:36:21 AM","Omg that would be so helpful"
-Jess,"Aug 31, 2024 11:36:41 AM","She was up so much last night and is in a mood from all the hustle and bustle"
+4. **Performance**
+   - Optimize for efficient processing
+   - Handle large message histories gracefully
+   - Clean up resources after execution

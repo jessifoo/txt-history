@@ -1,0 +1,75 @@
+[project]
+name = "txt-history"
+version = "0.1.0"
+description = "Process and format text message history exports from iMessage"
+authors = [{name = "Jessica Johnson", email= "<2334167+jessifoo@users.noreply.github.com>"}]
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "requests>=2.32.3",
+    "html5lib>=1.1",
+    "pandas>=2.2.3",
+    "numpy>=2.2.3",
+    "validators>=0.34.0",
+    "lxml>=5.3.1",
+    "aiohttp>=3.11.12",
+    "ruff (>=0.9.6,<0.10.0)",
+    "flask (>=3.1.0,<4.0.0)",
+    "aiofiles (>=24.1.0,<25.0.0)",
+    "pytz (>=2025.1,<2026.0)"
+]
+
+[project.scripts]
+format = "scripts.format_txts:cli_main"
+get_dois = "scripts.get_dois:main"
+test = "scripts.practise_test:main"
+
+[tool.poetry]
+packages = [
+    { include = "scripts" }
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+requests = ">=2.32.3"
+html5lib = ">=1.1"
+pandas = ">=2.2.3"
+numpy = ">=2.2.3"
+validators = ">=0.34.0"
+lxml = ">=5.3.1"
+aiohttp = ">=3.11.12"
+ruff = ">=0.9.6,<0.10.0"
+flask = ">=3.1.0,<4.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.4"
+ruff-lsp = "^0.0.62"
+isort = "^6.0.0"
+pytest-asyncio = "^0.23.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[virtualenvs]
+create = true
+in-project = true
+
+[tool.ruff]
+line-length = 120
+exclude = ["scripts/output"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D203",  # no-blank-line-before-class
+    "D212",  # multi-line-summary-first-line
+    "ANN101", # missing-type-self
+    "ERA001",
+    "E501"
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_fixture_loop_scope = "function"
+testpaths = ["tests"]

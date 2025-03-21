@@ -1,0 +1,48 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"terminal.integrated.shellIntegration.enabled": true,
+		"terminal.integrated.defaultProfile.osx": "zsh (2)",
+		"terminal.integrated.profiles.osx": {
+			"bash": {
+				"path": "bash",
+				"args": [
+					"-l"
+				],
+				"icon": "terminal-bash"
+			},
+			"zsh": {
+				"path": "zsh",
+				"args": [
+					"-l"
+				]
+			},
+			"tmux": {
+				"path": "tmux",
+				"icon": "terminal-tmux"
+			},
+			"pwsh": {
+				"path": "pwsh",
+				"icon": "terminal-powershell"
+			}
+		},
+		"php.validate.enable": true,
+		"php.suggest.basic": true,
+		"php.validate.run": "onType",
+		"python.languageServer": "None",
+		"ruff.enable": true,
+		"ruff.organizeImports": true,
+		"ruff.nativeServer": "on",
+		"ruff.interpreter": ["${workspaceFolder}/.venv/bin/python"]
+	},
+	"extensions": {
+		"recommendations": [
+            "lee2py.aider-composer",
+            "zazmic.palm-api-code-review"
+		]
+	}
+}
