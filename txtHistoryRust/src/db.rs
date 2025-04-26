@@ -1,17 +1,40 @@
-use std::env;
-use std::fs;
+use anyhow::Result;
+use chrono::{NaiveDateTime, Utc};
+use r2d2::Pool;
+use rusqlite::{Connection, Row, params};
 use std::path::Path;
 
-use anyhow::{Context, Result};
-use chrono::{Local, NaiveDateTime, Utc};
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use crate::models::{DbContact, DbMessage, DbProcessedMessage, NewContact, NewMessage, NewProcessedMessage};
 
-use crate::models::{
-    DbContact, DbMessage, DbProcessedMessage, Filter, FilterType, NewContact, NewMessage, NewProcessedMessage, Operator, QueryBuilder,
-};
-use crate::schema::{contacts, messages, processed_messages};
+// Custom connection manager for rusqlite
+pub struct SqliteConnectionManager {
+    path: String,
+}
+
+impl SqliteConnectionManager {
+    pub fn file<P: AsRef<Path>>(path: P) -> Self {
+        Self {
+            path: path.as_ref().to_string_lossy().to_string(),
+        }
+    }
+}
+
+impl r2d2::ManageConnection for SqliteConnectionManager {
+    type Connection = Connection;
+    type Error = rusqlite::Error;
+
+    fn connect(&self) -> std::result::Result<Connection, rusqlite::Error> {
+        Connection::open(&self.path)
+    }
+
+    fn is_valid(&self, conn: &mut Connection) -> std::result::Result<(), rusqlite::Error> {
+        conn.execute_batch("").map_err(Into::into)
+    }
+
+    fn has_broken(&self, _conn: &mut Connection) -> bool {
+        false
+    }
+}
 
 // Type alias for the database connection pool
 pub type DbPool = Pool<SqliteConnectionManager>;
@@ -27,7 +50,7 @@ impl Database {
     pub fn new(database_url: &str) -> Result<Self> {
         // Create parent directory if it doesn't exist
         if let Some(parent) = Path::new(database_url).parent() {
-            fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)?;
         }
 
         // Set up connection manager and pool
@@ -82,7 +105,7 @@ impl Database {
     fn ensure_contact(&self, conn: &Connection, name: &str, phone: Option<&str>, email: Option<&str>, is_me: bool) -> Result<DbContact> {
         // Check if contact exists
         let contact_exists: bool = conn.query_row(
-            &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE {} = ?)", contacts::TABLE, contacts::NAME),
+            &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE {} = ?)", "contacts", "name"),
             params![name],
             |row| row.get(0),
         )?;
@@ -92,11 +115,7 @@ impl Database {
             conn.execute(
                 &format!(
                     "INSERT INTO {} ({}, {}, {}, {}) VALUES (?, ?, ?, ?)",
-                    contacts::TABLE,
-                    contacts::NAME,
-                    contacts::PHONE,
-                    contacts::EMAIL,
-                    contacts::IS_ME
+                    "contacts", "name", "phone", "email", "is_me"
                 ),
                 params![name, phone.map(ToString::to_string), email.map(ToString::to_string), is_me],
             )?;
@@ -113,7 +132,7 @@ impl Database {
         // Check if message already exists
         let existing: Option<DbMessage> = conn
             .query_row(
-                &format!("SELECT * FROM {} WHERE {} = ?", messages::TABLE, messages::IMESSAGE_ID),
+                &format!("SELECT * FROM {} WHERE {} = ?", "messages", "imessage_id"),
                 params![new_message.imessage_id],
                 |row| self.map_db_message(row),
             )
@@ -128,18 +147,19 @@ impl Database {
 
             conn.execute(
                 &format!(
-                    "INSERT INTO {} ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    messages::TABLE,
-                    messages::IMESSAGE_ID,
-                    messages::TEXT,
-                    messages::SENDER,
-                    messages::IS_FROM_ME,
-                    messages::DATE_CREATED,
-                    messages::DATE_IMPORTED,
-                    messages::HANDLE_ID,
-                    messages::SERVICE,
-                    messages::THREAD_ID,
-                    messages::HAS_ATTACHMENTS
+                    "INSERT INTO {} ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "messages",
+                    "imessage_id",
+                    "text",
+                    "sender",
+                    "is_from_me",
+                    "date_created",
+                    "date_imported",
+                    "handle_id",
+                    "service",
+                    "thread_id",
+                    "has_attachments",
+                    "contact_id"
                 ),
                 params![
                     new_message.imessage_id,
@@ -151,7 +171,8 @@ impl Database {
                     new_message.handle_id,
                     new_message.service,
                     new_message.thread_id,
-                    new_message.has_attachments
+                    new_message.has_attachments,
+                    new_message.contact_id
                 ],
             )?;
 
@@ -183,22 +204,22 @@ impl Database {
         let conn = self.get_connection()?;
 
         // Build query
-        let mut query = String::from(format!("SELECT * FROM {} WHERE {} = ?", messages::TABLE, messages::SENDER));
+        let mut query = String::from(format!("SELECT * FROM {} WHERE {} = ?", "messages", "sender"));
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(contact_name.to_string())];
 
         // Apply date filters if provided
         if let Some(start) = start_date {
-            query.push_str(&format!(" AND {} >= ?", messages::DATE_CREATED));
+            query.push_str(&format!(" AND {} >= ?", "date_created"));
             params.push(Box::new(start));
         }
 
         if let Some(end) = end_date {
-            query.push_str(&format!(" AND {} <= ?", messages::DATE_CREATED));
+            query.push_str(&format!(" AND {} <= ?", "date_created"));
             params.push(Box::new(end));
         }
 
         // Order by date
-        query.push_str(&format!(" ORDER BY {} ASC", messages::DATE_CREATED));
+        query.push_str(&format!(" ORDER BY {} ASC", "date_created"));
 
         // Execute query
         let mut stmt = conn.prepare(&query)?;
@@ -213,31 +234,31 @@ impl Database {
     }
 
     /// Map a database row to a DbMessage
-    fn map_db_message(&self, row: &Row) -> rusqlite::Result<DbMessage> {
+    fn map_db_message(&self, row: &Row<'_>) -> rusqlite::Result<DbMessage> {
         Ok(DbMessage {
-            id: row.get(messages::ID)?,
-            imessage_id: row.get(messages::IMESSAGE_ID)?,
-            text: row.get(messages::TEXT)?,
-            sender: row.get(messages::SENDER)?,
-            is_from_me: row.get(messages::IS_FROM_ME)?,
-            date_created: row.get(messages::DATE_CREATED)?,
-            date_imported: row.get(messages::DATE_IMPORTED)?,
-            handle_id: row.get(messages::HANDLE_ID)?,
-            service: row.get(messages::SERVICE)?,
-            thread_id: row.get(messages::THREAD_ID)?,
-            has_attachments: row.get(messages::HAS_ATTACHMENTS)?,
-            contact_id: row.get("contact_id").optional()?,
+            id: row.get(0)?,
+            imessage_id: row.get(1)?,
+            text: row.get(2)?,
+            sender: row.get(3)?,
+            is_from_me: row.get(4)?,
+            date_created: row.get(5)?,
+            date_imported: row.get(6)?,
+            handle_id: row.get(7)?,
+            service: row.get(8)?,
+            thread_id: row.get(9)?,
+            has_attachments: row.get(10)?,
+            contact_id: row.get(11)?,
         })
     }
 
     /// Map a database row to a DbContact
-    fn map_db_contact(&self, row: &Row) -> rusqlite::Result<DbContact> {
+    fn map_db_contact(&self, row: &Row<'_>) -> rusqlite::Result<DbContact> {
         Ok(DbContact {
-            id: row.get(contacts::ID)?,
-            name: row.get(contacts::NAME)?,
-            phone: row.get(contacts::PHONE)?,
-            email: row.get(contacts::EMAIL)?,
-            is_me: row.get(contacts::IS_ME)?,
+            id: row.get(0)?,
+            name: row.get(1)?,
+            phone: row.get(2)?,
+            email: row.get(3)?,
+            is_me: row.get(4)?,
         })
     }
 
@@ -247,7 +268,7 @@ impl Database {
 
         let message = conn
             .query_row(
-                &format!("SELECT * FROM {} WHERE {} = ?", messages::TABLE, messages::ID),
+                &format!("SELECT * FROM {} WHERE {} = ?", "messages", "id"),
                 params![message_id],
                 |row| self.map_db_message(row),
             )
@@ -262,7 +283,7 @@ impl Database {
 
         let contact = conn
             .query_row(
-                &format!("SELECT * FROM {} WHERE {} = ?", contacts::TABLE, contacts::NAME),
+                &format!("SELECT * FROM {} WHERE {} = ?", "contacts", "name"),
                 params![name],
                 |row| self.map_db_contact(row),
             )
@@ -278,12 +299,7 @@ impl Database {
         // Check if contact already exists by name
         let existing: Option<DbContact> = conn
             .query_row(
-                &format!(
-                    "SELECT * FROM {} WHERE {} = ? AND {} = ?",
-                    contacts::TABLE,
-                    contacts::NAME,
-                    contacts::IS_ME
-                ),
+                &format!("SELECT * FROM {} WHERE {} = ? AND {} = ?", "contacts", "name", "is_me"),
                 params![new_contact.name, new_contact.is_me],
                 |row| self.map_db_contact(row),
             )
@@ -296,14 +312,14 @@ impl Database {
 
             if let Some(phone) = &new_contact.phone {
                 if contact.phone.as_ref() != Some(phone) {
-                    update_fields.push(format!("{} = ?", contacts::PHONE));
+                    update_fields.push(format!("{} = ?", "phone"));
                     update_params.push(Box::new(phone.clone()));
                 }
             }
 
             if let Some(email) = &new_contact.email {
                 if contact.email.as_ref() != Some(email) {
-                    update_fields.push(format!("{} = ?", contacts::EMAIL));
+                    update_fields.push(format!("{} = ?", "email"));
                     update_params.push(Box::new(email.clone()));
                 }
             }
@@ -312,12 +328,7 @@ impl Database {
                 // Add the contact ID for the WHERE clause
                 update_params.push(Box::new(contact.id));
 
-                let query = format!(
-                    "UPDATE {} SET {} WHERE {} = ?",
-                    contacts::TABLE,
-                    update_fields.join(", "),
-                    contacts::ID
-                );
+                let query = format!("UPDATE {} SET {} WHERE {} = ?", "contacts", update_fields.join(", "), "id");
 
                 conn.execute(&query, rusqlite::params_from_iter(update_params.iter()))?;
 
@@ -333,11 +344,7 @@ impl Database {
             conn.execute(
                 &format!(
                     "INSERT INTO {} ({}, {}, {}, {}) VALUES (?, ?, ?, ?)",
-                    contacts::TABLE,
-                    contacts::NAME,
-                    contacts::PHONE,
-                    contacts::EMAIL,
-                    contacts::IS_ME
+                    "contacts", "name", "phone", "email", "is_me"
                 ),
                 params![new_contact.name, new_contact.phone, new_contact.email, new_contact.is_me],
             )?;
@@ -355,37 +362,35 @@ impl Database {
         let conn = self.get_connection()?;
 
         // Get the contact
-        let contact = self
+        let _contact = self
             .get_contact(person_name)?
             .ok_or_else(|| anyhow::anyhow!("Contact not found: {}", person_name))?;
 
         // Get messages where the sender is the person
-        let mut query = format!("SELECT * FROM {} WHERE {} = ?", messages::TABLE, messages::SENDER);
+        let mut query = format!("SELECT * FROM {} WHERE {} = ?", "messages", "sender");
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(person_name.to_string())];
 
         // Apply date filters if provided
         if let Some(start) = start_date {
-            query.push_str(&format!(" AND {} >= ?", messages::DATE_CREATED));
+            query.push_str(&format!(" AND {} >= ?", "date_created"));
             params.push(Box::new(start));
         }
 
         if let Some(end) = end_date {
-            query.push_str(&format!(" AND {} <= ?", messages::DATE_CREATED));
+            query.push_str(&format!(" AND {} <= ?", "date_created"));
             params.push(Box::new(end));
         }
 
         // Get messages where the sender is me and the recipient is the person
         query.push_str(&format!(
             " UNION SELECT * FROM {} WHERE {} = ? AND {} = ?",
-            messages::TABLE,
-            messages::IS_FROM_ME,
-            messages::SENDER
+            "messages", "is_from_me", "sender"
         ));
         params.push(Box::new(true));
         params.push(Box::new("Jess".to_string()));
 
         // Order by date
-        query.push_str(&format!(" ORDER BY {} ASC", messages::DATE_CREATED));
+        query.push_str(&format!(" ORDER BY {} ASC", "date_created"));
 
         // Execute query
         let mut stmt = conn.prepare(&query)?;
@@ -408,9 +413,7 @@ impl Database {
             .query_row(
                 &format!(
                     "SELECT * FROM {} WHERE {} = ? AND {} = ?",
-                    processed_messages::TABLE,
-                    processed_messages::ORIGINAL_MESSAGE_ID,
-                    processed_messages::PROCESSING_VERSION
+                    "processed_messages", "original_message_id", "processing_version"
                 ),
                 params![new_processed.original_message_id, new_processed.processing_version],
                 |row| self.map_db_processed_message(row),
@@ -426,16 +429,16 @@ impl Database {
 
             conn.execute(
                 &format!(
-                    "INSERT INTO {} ({}, {}, {}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    processed_messages::TABLE,
-                    processed_messages::ORIGINAL_MESSAGE_ID,
-                    processed_messages::PROCESSED_TEXT,
-                    processed_messages::TOKENS,
-                    processed_messages::LEMMATIZED_TEXT,
-                    processed_messages::NAMED_ENTITIES,
-                    processed_messages::SENTIMENT_SCORE,
-                    processed_messages::PROCESSED_AT,
-                    processed_messages::PROCESSING_VERSION
+                    "INSERT INTO {} ({}, {}, {}, {}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "processed_messages",
+                    "original_message_id",
+                    "processed_text",
+                    "tokens",
+                    "lemmatized_text",
+                    "named_entities",
+                    "sentiment_score",
+                    "processed_at",
+                    "processing_version"
                 ),
                 params![
                     new_processed.original_message_id,
@@ -468,17 +471,17 @@ impl Database {
     }
 
     /// Map a database row to a DbProcessedMessage
-    fn map_db_processed_message(&self, row: &Row) -> rusqlite::Result<DbProcessedMessage> {
+    fn map_db_processed_message(&self, row: &Row<'_>) -> rusqlite::Result<DbProcessedMessage> {
         Ok(DbProcessedMessage {
-            id: row.get(processed_messages::ID)?,
-            original_message_id: row.get(processed_messages::ORIGINAL_MESSAGE_ID)?,
-            processed_text: row.get(processed_messages::PROCESSED_TEXT)?,
-            tokens: row.get(processed_messages::TOKENS)?,
-            lemmatized_text: row.get(processed_messages::LEMMATIZED_TEXT)?,
-            named_entities: row.get(processed_messages::NAMED_ENTITIES)?,
-            sentiment_score: row.get(processed_messages::SENTIMENT_SCORE)?,
-            processed_at: row.get(processed_messages::PROCESSED_AT)?,
-            processing_version: row.get(processed_messages::PROCESSING_VERSION)?,
+            id: row.get(0)?,
+            original_message_id: row.get(1)?,
+            processed_text: row.get(2)?,
+            tokens: row.get(3)?,
+            lemmatized_text: row.get(4)?,
+            named_entities: row.get(5)?,
+            sentiment_score: row.get(6)?,
+            processed_at: row.get(7)?,
+            processing_version: row.get(8)?,
         })
     }
 
@@ -490,9 +493,7 @@ impl Database {
             .query_row(
                 &format!(
                     "SELECT * FROM {} WHERE {} = ? AND {} = ?",
-                    processed_messages::TABLE,
-                    processed_messages::ORIGINAL_MESSAGE_ID,
-                    processed_messages::PROCESSING_VERSION
+                    "processed_messages", "original_message_id", "processing_version"
                 ),
                 params![message_id, version],
                 |row| self.map_db_processed_message(row),
@@ -508,8 +509,7 @@ impl Database {
 
         let mut stmt = conn.prepare(&format!(
             "SELECT * FROM {} WHERE {} = ?",
-            processed_messages::TABLE,
-            processed_messages::PROCESSING_VERSION
+            "processed_messages", "processing_version"
         ))?;
 
         let processed_iter = stmt.query_map(params![version], |row| self.map_db_processed_message(row))?;
@@ -528,13 +528,7 @@ impl Database {
 
         let query = format!(
             "SELECT m.{} FROM {} m LEFT JOIN {} p ON m.{} = p.{} AND p.{} = ? WHERE p.{} IS NULL",
-            messages::ID,
-            messages::TABLE,
-            processed_messages::TABLE,
-            messages::ID,
-            processed_messages::ORIGINAL_MESSAGE_ID,
-            processed_messages::PROCESSING_VERSION,
-            processed_messages::ID
+            "id", "messages", "processed_messages", "id", "original_message_id", "processing_version", "id"
         );
 
         let mut stmt = conn.prepare(&query)?;
@@ -553,19 +547,15 @@ impl Database {
         let conn = self.get_connection()?;
 
         // Get total message count
-        let total_messages: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {}", messages::TABLE), params![], |row| row.get(0))?;
+        let total_messages: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {}", "messages"), params![], |row| row.get(0))?;
 
         // Get processed message count
-        let processed_messages: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {}", processed_messages::TABLE), params![], |row| {
+        let processed_messages: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {}", "processed_messages"), params![], |row| {
             row.get(0)
         })?;
 
         // Get unique processing versions
-        let mut stmt = conn.prepare(&format!(
-            "SELECT DISTINCT {} FROM {}",
-            processed_messages::PROCESSING_VERSION,
-            processed_messages::TABLE
-        ))?;
+        let mut stmt = conn.prepare(&format!("SELECT DISTINCT {} FROM {}", "processing_version", "processed_messages"))?;
 
         let version_iter = stmt.query_map(params![], |row| row.get::<_, String>(0))?;
 
@@ -580,6 +570,22 @@ impl Database {
             processing_versions: versions,
         })
     }
+
+    /// Get messages for a contact by name within a date range
+    pub fn get_messages_by_contact_name(
+        &self, contact_name: &str, date_range: &crate::models::DateRange,
+    ) -> Result<Vec<crate::models::Message>> {
+        let start_date = date_range.start.map(|dt| dt.naive_local());
+        let end_date = date_range.end.map(|dt| dt.naive_local());
+
+        // Get the raw database messages
+        let db_messages = self.get_messages(contact_name, start_date, end_date)?;
+
+        // Convert to the original Message format
+        let messages: Vec<_> = db_messages.into_iter().map(|m| m.to_message()).collect();
+
+        Ok(messages)
+    }
 }
 
 /// Statistics about message processing
@@ -593,7 +599,7 @@ pub struct ProcessingStats {
 /// Initialize the database connection
 pub fn establish_connection() -> Result<Database> {
     // Get database URL from environment or use default
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:data/messages.db".to_string());
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:data/messages.db".to_string());
 
     // Create database connection
     let database = Database::new(&database_url)?;

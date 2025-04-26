@@ -1,0 +1,44 @@
+# Ruff configuration file
+
+# Select rules to enable
+select = ["E", "F", "I", "W", "C", "B", "UP", "SIM", "PTH", "COM"]
+
+# Ignore specific rules
+ignore = [
+    # Line length
+    "E501",  # Line too long
+
+    # Whitespace
+    "W291",  # Trailing whitespace
+    "W292",  # No newline at end of file
+    "W293",  # Blank line contains whitespace
+    "E303",  # Too many blank lines
+
+    # Docstrings - ignoring ALL docstring lints by category
+    "D",     # All docstring-related rules
+
+    # Copyright notice
+    "CPY",   # All copyright-related rules
+
+    # Logging
+    "G004",  # Logging statement uses f-string
+    "COM812",
+]
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+# Assume Python 3.12
+target-version = "py312"
+
+# Import sorting configuration
+[isort]
+known-third-party = ["aiofiles", "pytz"]
+
+# Formatter configuration
+[format]
+quote-style = "double"  # Use double quotes for strings
+indent-style = "space"  # Use spaces for indentation
+line-ending = "auto"    # Auto-detect line endings
+docstring-code-format = true  # Format code blocks in docstrings
+skip-magic-trailing-comma = false  # Add trailing commas where possible

@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -28,6 +28,16 @@ pub enum OutputFormat {
     Csv,
     Txt,
     Json,
+}
+
+impl OutputFormat {
+    pub fn extension(&self) -> &'static str {
+        match self {
+            OutputFormat::Csv => "csv",
+            OutputFormat::Txt => "txt",
+            OutputFormat::Json => "json",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,9 +70,10 @@ pub struct DbMessage {
 pub struct NlpAnalysis {
     pub tokens: Vec<String>,
     pub entities: Vec<NamedEntity>,
-    pub sentiment_score: f32,
+    pub sentiment_score: Option<f32>,
     pub language: Option<String>,
     pub processed_text: String,
+    pub lemmatized_text: Option<String>,
 }
 
 // Named entity representation
@@ -81,9 +92,9 @@ impl NlpAnalysis {
             original_message_id: message_id,
             processed_text: self.processed_text.clone(),
             tokens: Some(self.tokens.join(" ")),
-            lemmatized_text: None, // We don't store this in the struct anymore
+            lemmatized_text: self.lemmatized_text.clone(),
             named_entities: Some(serde_json::to_string(&self.entities).unwrap_or_default()),
-            sentiment_score: Some(self.sentiment_score),
+            sentiment_score: self.sentiment_score,
             processing_version: version.to_string(),
         }
     }

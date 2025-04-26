@@ -162,7 +162,6 @@ cython_debug/
 .snapshots
 .idea
 .ruff_cache
-.vscode/
 output/
 
 

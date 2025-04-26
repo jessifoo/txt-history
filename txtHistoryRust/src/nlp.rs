@@ -59,17 +59,21 @@ impl NlpProcessor {
         let lemmatized_text = self.lemmatize(&tokens);
 
         // Extract named entities (simplified implementation)
-        let named_entities = self.extract_entities(&processed_text);
+        let entities = self.extract_entities(&processed_text);
 
         // Calculate sentiment score (simplified implementation)
         let sentiment_score = self.analyze_sentiment(&processed_text);
 
+        // Detect language
+        let language = detect(text).map(|info| info.lang().code().to_string());
+
         Ok(NlpAnalysis {
             processed_text,
             tokens,
+            entities,
             lemmatized_text: Some(lemmatized_text),
-            named_entities: Some(named_entities),
             sentiment_score: Some(sentiment_score),
+            language,
         })
     }
 
@@ -124,14 +128,14 @@ impl NlpProcessor {
                     if !word.is_empty() && word.chars().next().unwrap().is_uppercase() {
                         // Skip common sentence starters
                         if i > 0 || !["I", "The", "A", "An", "This", "That"].contains(word) {
-                            let start_pos = text.find(word).unwrap_or(0);
-                            let end_pos = start_pos + word.len();
+                            let start = text.find(word).unwrap_or(0);
+                            let end = start + word.len();
 
                             entities.push(NamedEntity {
                                 text: word.to_string(),
                                 entity_type: "PERSON".to_string(), // Simplified
-                                start_pos,
-                                end_pos,
+                                start,
+                                end,
                             });
                         }
                     }
