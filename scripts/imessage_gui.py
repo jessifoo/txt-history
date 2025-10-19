@@ -326,7 +326,7 @@ class IMessageExporterGUI:
         )
         size_radio.pack(anchor=tk.W)
 
-        self.size_var = tk.StringVar(value="10")
+        self.size_var = tk.StringVar(value="0.05")
         size_entry = ttk.Entry(chunk_frame, textvariable=self.size_var, width=8)
         size_entry.pack(anchor=tk.W, padx=(20, 0))
 
