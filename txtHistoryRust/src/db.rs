@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{NaiveDateTime, Utc};
 use r2d2::Pool;
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, Row, params, OptionalExtension};
 use std::path::Path;
 
 use crate::models::{DbContact, DbMessage, DbProcessedMessage, NewContact, NewMessage, NewProcessedMessage};
@@ -429,7 +429,7 @@ impl Database {
 
             conn.execute(
                 &format!(
-                    "INSERT INTO {} ({}, {}, {}, {}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO {} ({}, {}, {}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     "processed_messages",
                     "original_message_id",
                     "processed_text",
