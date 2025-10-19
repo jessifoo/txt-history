@@ -5,6 +5,7 @@ A user-friendly desktop application for exporting iMessage conversations.
 """
 
 import asyncio
+import sqlite3
 import tkinter as tk
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -325,7 +326,7 @@ class IMessageExporterGUI:
         )
         size_radio.pack(anchor=tk.W)
 
-        self.size_var = tk.StringVar(value="10")
+        self.size_var = tk.StringVar(value="0.05")
         size_entry = ttk.Entry(chunk_frame, textvariable=self.size_var, width=8)
         size_entry.pack(anchor=tk.W, padx=(20, 0))
 
@@ -414,7 +415,7 @@ class IMessageExporterGUI:
         db_entry.pack(fill=tk.X, pady=(5, 0))
 
         # Set default database path
-        default_db = Path(__file__).parent.parent / "data" / "messages.db"
+        default_db = Path(__file__).parent / "contacts.db"
         self.db_path_var.set(str(default_db))
 
         ttk.Button(db_frame, text="Browse...", command=self.browse_db_path).pack(
@@ -466,7 +467,8 @@ Note: Requires iMessage Exporter tool to be installed.
     def initialize_components(self):
         """Initialize the core application components."""
         try:
-            self.db_manager = DatabaseManager(Path(self.db_path_var.get()))
+            db_path = Path(self.db_path_var.get()) if self.db_path_var.get() else None
+            self.db_manager = DatabaseManager(db_path)
             self.contact_manager = ContactManager(self.db_manager)
             self.processor = MessageProcessor(self.db_manager)
             self.export_manager = ExportManager(self.db_manager, self.processor)
@@ -481,15 +483,21 @@ Note: Requires iMessage Exporter tool to be installed.
         """Refresh the contact list in the export tab."""
         self.contact_listbox.delete(0, tk.END)
         try:
-            # Get all contacts from database
-            with self.db_manager.db_path.open() as f:
-                pass  # Just check if database exists
-
-            # For now, we'll get contacts from the database
-            # In a real implementation, you'd query the contacts table
-            self.contact_listbox.insert(tk.END, "Loading contacts...")
-        except Exception:
-            self.contact_listbox.insert(tk.END, "No contacts configured yet")
+            if self.db_manager and self.db_manager.db_path.exists():
+                # Get all contacts from database
+                with sqlite3.connect(self.db_manager.db_path) as conn:
+                    cursor = conn.execute("SELECT name FROM contacts ORDER BY name")
+                    contacts = cursor.fetchall()
+                    
+                if contacts:
+                    for (name,) in contacts:
+                        self.contact_listbox.insert(tk.END, name)
+                else:
+                    self.contact_listbox.insert(tk.END, "No contacts found - add some in the Contacts tab")
+            else:
+                self.contact_listbox.insert(tk.END, "Database not initialized")
+        except Exception as e:
+            self.contact_listbox.insert(tk.END, f"Error loading contacts: {e}")
 
     def load_contacts(self):
         """Load contacts into the contacts management treeview."""
@@ -498,9 +506,18 @@ Note: Requires iMessage Exporter tool to be installed.
             self.contacts_tree.delete(item)
 
         try:
-            # In a real implementation, you'd query the contacts table here
-            # For now, we'll show a placeholder
-            self.contacts_tree.insert("", tk.END, values=("No contacts yet", "", ""))
+            if self.db_manager and self.db_manager.db_path.exists():
+                with sqlite3.connect(self.db_manager.db_path) as conn:
+                    cursor = conn.execute("SELECT name, phone, email FROM contacts ORDER BY name")
+                    contacts = cursor.fetchall()
+                    
+                if contacts:
+                    for name, phone, email in contacts:
+                        self.contacts_tree.insert("", tk.END, values=(name, phone or "", email or ""))
+                else:
+                    self.contacts_tree.insert("", tk.END, values=("No contacts found", "", ""))
+            else:
+                self.contacts_tree.insert("", tk.END, values=("Database not initialized", "", ""))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load contacts: {e}")
 
@@ -571,6 +588,78 @@ Note: Requires iMessage Exporter tool to be installed.
         # Bind Enter key to save
         dialog.bind("<Return>", lambda e: save_contact())
 
+    def edit_contact_dialog(self, current_name: str, current_phone: str, current_email: str):
+        """Show dialog to edit an existing contact."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Contact")
+        dialog.geometry("300x200")
+        dialog.resizable(False, False)
+
+        # Center dialog
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Form fields
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="Name:").pack(anchor=tk.W, pady=(0, 5))
+        name_var = tk.StringVar(value=current_name)
+        name_entry = ttk.Entry(main_frame, textvariable=name_var, width=30)
+        name_entry.pack(fill=tk.X, pady=(0, 10))
+        name_entry.focus()
+
+        ttk.Label(main_frame, text="Phone:").pack(anchor=tk.W, pady=(0, 5))
+        phone_var = tk.StringVar(value=current_phone)
+        phone_entry = ttk.Entry(main_frame, textvariable=phone_var, width=30)
+        phone_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(main_frame, text="Email (optional):").pack(anchor=tk.W, pady=(0, 5))
+        email_var = tk.StringVar(value=current_email)
+        email_entry = ttk.Entry(main_frame, textvariable=email_var, width=30)
+        email_entry.pack(fill=tk.X)
+
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(20, 0))
+
+        def save_contact():
+            name = name_var.get().strip()
+            phone = phone_var.get().strip()
+            email = email_var.get().strip() or None
+
+            if not name:
+                messagebox.showerror("Error", "Contact name is required")
+                return
+
+            if not phone and not email:
+                messagebox.showerror("Error", "At least phone or email is required")
+                return
+
+            try:
+                with sqlite3.connect(self.db_manager.db_path) as conn:
+                    # Update the contact
+                    conn.execute(
+                        "UPDATE contacts SET name = ?, phone = ?, email = ? WHERE name = ?",
+                        (name, phone, email, current_name)
+                    )
+                self.load_contacts()
+                self.refresh_contact_list()
+                dialog.destroy()
+                self.status_var.set(f"Contact '{name}' updated successfully")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to update contact: {e}")
+
+        ttk.Button(button_frame, text="Save", command=save_contact).pack(
+            side=tk.RIGHT, padx=(5, 0)
+        )
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(
+            side=tk.RIGHT
+        )
+
+        # Bind Enter key to save
+        dialog.bind("<Return>", lambda e: save_contact())
+
     def remove_selected_contacts(self):
         """Remove selected contacts from the list."""
         selected = self.contact_listbox.curselection()
@@ -579,12 +668,16 @@ Note: Requires iMessage Exporter tool to be installed.
             return
 
         if messagebox.askyesno("Confirm", "Remove selected contacts?"):
-            for index in reversed(selected):
-                contact_name = self.contact_listbox.get(index)
-                # Remove from database
-                # Implementation would go here
-                self.contact_listbox.delete(index)
-            self.status_var.set("Contacts removed")
+            try:
+                with sqlite3.connect(self.db_manager.db_path) as conn:
+                    for index in reversed(selected):
+                        contact_name = self.contact_listbox.get(index)
+                        conn.execute("DELETE FROM contacts WHERE name = ?", (contact_name,))
+                        self.contact_listbox.delete(index)
+                self.status_var.set("Contacts removed")
+                self.load_contacts()  # Refresh the contacts management tab
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to remove contacts: {e}")
 
     def remove_selected_contact(self):
         """Remove selected contact from the management tab."""
@@ -594,10 +687,16 @@ Note: Requires iMessage Exporter tool to be installed.
             return
 
         if messagebox.askyesno("Confirm", "Remove selected contact?"):
-            # Remove from database
-            # Implementation would go here
-            self.load_contacts()
-            self.status_var.set("Contact removed")
+            try:
+                item = selected[0]
+                contact_name = self.contacts_tree.item(item, "values")[0]
+                with sqlite3.connect(self.db_manager.db_path) as conn:
+                    conn.execute("DELETE FROM contacts WHERE name = ?", (contact_name,))
+                self.load_contacts()
+                self.refresh_contact_list()  # Refresh the export tab too
+                self.status_var.set("Contact removed")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to remove contact: {e}")
 
     def edit_selected_contact(self):
         """Edit the selected contact."""
@@ -611,8 +710,8 @@ Note: Requires iMessage Exporter tool to be installed.
         values = self.contacts_tree.item(item, "values")
         name, phone, email = values
 
-        # Show edit dialog (similar to add dialog)
-        self.add_contact_dialog()
+        # Show edit dialog with pre-filled values
+        self.edit_contact_dialog(name, phone, email)
 
     def browse_db_path(self):
         """Browse for database file."""

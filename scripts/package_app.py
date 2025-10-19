@@ -325,6 +325,112 @@ end tell
         print(f"   ⚠️  Could not create desktop shortcut: {e}")
 
 
+def create_mac_app_bundle(app_dir: Path):
+    """Create a Mac .app bundle for the sister."""
+    print("🍎 Creating Mac .app bundle...")
+    
+    # Create the .app bundle
+    app_name = "iMessage Exporter.app"
+    app_path = app_dir / app_name
+    
+    # Remove existing app if it exists
+    if app_path.exists():
+        shutil.rmtree(app_path)
+    
+    # Create Contents directory
+    contents_dir = app_path / "Contents"
+    contents_dir.mkdir(parents=True)
+    
+    # Create MacOS directory
+    macos_dir = contents_dir / "MacOS"
+    macos_dir.mkdir()
+    
+    # Create Resources directory
+    resources_dir = contents_dir / "Resources"
+    resources_dir.mkdir()
+    
+    # Create the main executable
+    executable_content = '''#!/bin/bash
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+IMESSAGE_DIR="$APP_DIR/iMessageExporter"
+
+# Change to the iMessage Exporter directory
+cd "$IMESSAGE_DIR"
+
+# Check if Python is available
+if ! command -v python3 &> /dev/null; then
+    osascript -e 'display dialog "Python 3 is not installed. Please install Python 3 from python.org" buttons {"OK"} default button "OK"'
+    exit 1
+fi
+
+# Check if dependencies are installed
+if ! python3 -c "import pandas, pytz, aiofiles" 2>/dev/null; then
+    osascript -e 'display dialog "Installing required dependencies... This may take a few minutes." buttons {"OK"} default button "OK"'
+    
+    # Install dependencies
+    pip3 install pandas pytz aiofiles --user
+    
+    if [ $? -ne 0 ]; then
+        osascript -e 'display dialog "Failed to install dependencies. Please check your Python installation." buttons {"OK"} default button "OK"'
+        exit 1
+    fi
+fi
+
+# Run the GUI application
+python3 scripts/imessage_gui.py
+
+# If the GUI exits with an error, show a message
+if [ $? -ne 0 ]; then
+    osascript -e 'display dialog "The application encountered an error. Please check the console for details." buttons {"OK"} default button "OK"'
+fi
+'''
+    
+    executable_file = macos_dir / "iMessage Exporter"
+    executable_file.write_text(executable_content)
+    executable_file.chmod(0o755)
+    
+    # Create Info.plist
+    info_plist_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>iMessage Exporter</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.imessageexporter.app</string>
+    <key>CFBundleName</key>
+    <string>iMessage Exporter</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleDisplayName</key>
+    <string>iMessage Exporter</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.14</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+</dict>
+</plist>'''
+    
+    info_plist_file = contents_dir / "Info.plist"
+    info_plist_file.write_text(info_plist_content)
+    
+    print(f"   ✅ Mac .app bundle created: {app_name}")
+    print(f"   📁 Location: {app_path}")
+    print("   💡 Your sister can double-click this to run the app!")
+
 def main():
     """Main packaging function."""
     print("🚀 Packaging iMessage History Exporter...")
@@ -348,6 +454,9 @@ def main():
 
         # Create desktop shortcut
         create_desktop_shortcut(app_dir)
+
+        # Create Mac .app bundle
+        create_mac_app_bundle(app_dir)
 
         print("=" * 50)
         print("🎉 Packaging completed successfully!")
