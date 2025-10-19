@@ -1,13 +1,13 @@
 use anyhow::Result;
 use async_trait::async_trait;
-// use chrono::{Local, TimeZone}; // Unused for now
+use chrono::{Local, TimeZone};
 use csv::Writer;
-// use imessage_database::tables::{
-//     chat::Chat,
-//     handle::Handle,
-//     messages::Message as ImessageMessage,
-//     table::{Table, get_connection},
-// }; // Unused for now
+use imessage_database::tables::{
+    chat::Chat,
+    handle::Handle,
+    messages::Message as ImessageMessage,
+    table::{Table, get_connection},
+};
 use serde_json;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -228,16 +228,67 @@ impl IMessageDatabaseRepo {
     }
 
     // Helper method to find a handle by phone or email
-    async fn find_handle(&self, _contact: &Contact) -> Result<Option<()>> {
-        // TODO: Implement proper handle finding with imessage-database
-        // For now, return None to avoid compilation errors
+    async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
+        // Create a connection to the iMessage database
+        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+
+        // Try to find by phone first
+        if let Some(phone) = &contact.phone {
+            let mut stmt = Handle::get_by_id(&db, phone).map_err(|e| anyhow::anyhow!("Failed to prepare handle query: {}", e))?;
+
+            let handle = stmt
+                .query_map([], |row| Ok(Handle::from_row(row)))
+                .map_err(|e| anyhow::anyhow!("Failed to execute handle query: {}", e))?
+                .next();
+
+            if let Some(Ok(handle)) = handle {
+                return Ok(Some(
+                    Handle::extract(handle).map_err(|e| anyhow::anyhow!("Failed to extract handle: {}", e))?,
+                ));
+            }
+        }
+
+        // Then try by email
+        if let Some(email) = &contact.email {
+            let mut stmt = Handle::get_by_id(&db, email).map_err(|e| anyhow::anyhow!("Failed to prepare handle query: {}", e))?;
+
+            let handle = stmt
+                .query_map([], |row| Ok(Handle::from_row(row)))
+                .map_err(|e| anyhow::anyhow!("Failed to execute handle query: {}", e))?
+                .next();
+
+            if let Some(Ok(handle)) = handle {
+                return Ok(Some(
+                    Handle::extract(handle).map_err(|e| anyhow::anyhow!("Failed to extract handle: {}", e))?,
+                ));
+            }
+        }
+
+        // No handle found
         Ok(None)
     }
 
     // Helper method to find a chat by handle
-    async fn find_chat_by_handle(&self, _handle: &()) -> Result<Option<()>> {
-        // TODO: Implement proper chat finding with imessage-database
-        // For now, return None to avoid compilation errors
+    async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
+        // Create a connection to the iMessage database
+        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+
+        // Query for chats with this handle
+        let mut stmt = Chat::get_by_handle_id(&db, handle.rowid).map_err(|e| anyhow::anyhow!("Failed to prepare chat query: {}", e))?;
+
+        let chats = stmt
+            .query_map([], |row| Ok(Chat::from_row(row)))
+            .map_err(|e| anyhow::anyhow!("Failed to execute chat query: {}", e))?;
+
+        // Return the first chat found
+        for chat_result in chats {
+            if let Ok(chat) = chat_result {
+                return Ok(Some(
+                    Chat::extract(chat).map_err(|e| anyhow::anyhow!("Failed to extract chat: {}", e))?,
+                ));
+            }
+        }
+
         Ok(None)
     }
 
