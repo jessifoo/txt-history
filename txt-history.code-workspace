@@ -16,13 +16,17 @@
         "php.validate.run": "onType",
         "python.languageServer": "None",
         "ruff.enable": true,
-        "ruff.interpreter": ["${workspaceFolder}/.venv/bin/python"],
+        "ruff.interpreter": [
+            "${workspaceFolder}/.venv/bin/python"
+        ],
         "ruff.nativeServer": "on",
         "ruff.organizeImports": true,
         "terminal.integrated.defaultProfile.osx": "zsh",
         "terminal.integrated.profiles.osx": {
             "bash": {
-                "args": ["-l"],
+                "args": [
+                    "-l"
+                ],
                 "icon": "terminal-bash",
                 "path": "bash"
             },
@@ -35,11 +39,15 @@
                 "path": "tmux"
             },
             "zsh": {
-                "args": ["-l"],
+                "args": [
+                    "-l"
+                ],
                 "path": "zsh"
             }
         },
         "terminal.integrated.shellIntegration.enabled": true,
-        "terminal.integrated.suggest.enabled": true
+        "terminal.integrated.suggest.enabled": true,
+        "workbench.editor.alwaysShowEditorActions": true,
+        "workbench.editor.enablePreview": false
     }
 }

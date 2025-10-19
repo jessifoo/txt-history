@@ -10,6 +10,28 @@ import pytz
 logger = logging.getLogger(__name__)
 
 
+def slugify_contact_name(name: str) -> str:
+    """
+    Converts a contact name into a safe, SQLite-compatible table name suffix.
+    - Lowercases the name
+    - Replaces spaces and non-alphanumeric characters with underscores
+    - Collapses multiple underscores
+    - Strips leading/trailing underscores
+    - Raises ValueError if the result is empty
+    """
+    import re
+
+    if not name or not name.strip():
+        raise ValueError("Contact name cannot be empty.")
+    # Lowercase and replace non-alphanumeric with underscores
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", name.strip().lower())
+    slug = re.sub(r"_+", "_", slug)  # Collapse multiple underscores
+    slug = slug.strip("_")
+    if not slug:
+        raise ValueError(f"Contact name '{name}' slugifies to empty string.")
+    return slug
+
+
 def parse_date_string(date_str: str) -> datetime:
     """Parses a date string in various formats and returns a timezone-aware datetime object."""
     # Normalize multiple spaces to single space
@@ -38,7 +60,7 @@ def format_date_to_iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
-def calculate_earlier_date(date_str: str, days: int = 30) -> str | None:
+def calculate_earlier_date(date_str: str, days: int = 30) -> str or None:
     """Calculates a date a certain number of days earlier than the given date."""
     if not date_str:
         return None
