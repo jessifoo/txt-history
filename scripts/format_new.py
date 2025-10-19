@@ -30,40 +30,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import existing utilities
-try:
-    from .constants import DEFAULT_TIMEZONE, OUTPUT_DIR, TMP_PATH
-    from .utils import clean_message_content, is_date_in_future, parse_date_string
-except ImportError:
-    try:
-        from constants import DEFAULT_TIMEZONE, OUTPUT_DIR, TMP_PATH
-        from utils import clean_message_content, is_date_in_future, parse_date_string
-    except ImportError:
-        # Fallback defaults if modules aren't found
-        from pathlib import Path
-        OUTPUT_DIR = Path.home() / "txt_history_output"
-        TMP_PATH = Path.home() / "imessage-export"
-        DEFAULT_TIMEZONE = "America/Denver"
-
-        # Simple fallback implementations
-        def clean_message_content(message: str) -> str:
-            return "".join(char for char in message if char.isascii() and char.isprintable())
-
-        def is_date_in_future(date_str: str) -> bool:
-            from datetime import datetime
-            try:
-                date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                return date_obj > datetime.now()
-            except ValueError:
-                return False
-
-        def parse_date_string(date_str: str) -> datetime:
-            from datetime import datetime
-            import pytz
-            normalized = " ".join(date_str.split())
-            dt = datetime.strptime(normalized, "%b %d, %Y %I:%M:%S %p")
-            mountain_tz = pytz.timezone("America/Denver")
-            return mountain_tz.localize(dt)
+# Import utilities
+from constants import DEFAULT_TIMEZONE, OUTPUT_DIR, TMP_PATH
+from utils import clean_message_content, is_date_in_future, parse_date_string
 
 
 class ChunkStrategy(Enum):
