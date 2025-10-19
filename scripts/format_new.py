@@ -1024,7 +1024,7 @@ async def main() -> int:
     if chunking_info:
         print(f"   Chunking: {', '.join(chunking_info)}")
     else:
-        print("   Chunking: Single file"
+        print("   Chunking: Single file")
     print()
 
     # Determine chunking strategy
