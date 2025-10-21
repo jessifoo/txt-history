@@ -5,8 +5,8 @@ use csv::Writer;
 use imessage_database::tables::{
     chat::Chat,
     handle::Handle,
-    // messages::Message as ImessageMessage, // Unused for now
-    // table::{Table, get_connection}, // Unused for now
+    messages::Message as ImessageMessage,
+    table::{Table, get_connection},
 };
 use serde_json;
 use std::fs::File;
@@ -228,19 +228,86 @@ impl IMessageDatabaseRepo {
     }
 
     // Helper method to find a handle by phone or email
-    async fn find_handle(&self, _contact: &Contact) -> Result<Option<Handle>> {
-        // TODO: Implement proper handle finding with imessage-database 3.1.0
-        // The API has changed significantly and needs to be updated
-        // For now, return None to avoid compilation errors
+    async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
+        // Create a connection to the iMessage database
+        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+
+        // Try to find by phone first
+        if let Some(phone) = &contact.phone {
+            let mut found_handle: Option<Handle> = None;
+            
+            Handle::stream(&db, |handle_result| {
+                match handle_result {
+                    Ok(handle) => {
+                        if handle.id == *phone {
+                            found_handle = Some(handle);
+                            return Ok::<(), anyhow::Error>(());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error processing handle: {:?}", e);
+                    }
+                }
+                Ok(())
+            }).map_err(|e| anyhow::anyhow!("Failed to stream handles: {}", e))?;
+
+            if found_handle.is_some() {
+                return Ok(found_handle);
+            }
+        }
+
+        // Then try by email
+        if let Some(email) = &contact.email {
+            let mut found_handle: Option<Handle> = None;
+            
+            Handle::stream(&db, |handle_result| {
+                match handle_result {
+                    Ok(handle) => {
+                        if handle.id == *email {
+                            found_handle = Some(handle);
+                            return Ok::<(), anyhow::Error>(());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error processing handle: {:?}", e);
+                    }
+                }
+                Ok(())
+            }).map_err(|e| anyhow::anyhow!("Failed to stream handles: {}", e))?;
+
+            if found_handle.is_some() {
+                return Ok(found_handle);
+            }
+        }
+
+        // No handle found
         Ok(None)
     }
 
     // Helper method to find a chat by handle
-    async fn find_chat_by_handle(&self, _handle: &Handle) -> Result<Option<Chat>> {
-        // TODO: Implement proper chat finding with imessage-database 3.1.0
-        // The API has changed significantly and needs to be updated
-        // For now, return None to avoid compilation errors
-        Ok(None)
+    async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
+        // Create a connection to the iMessage database
+        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+
+        // Query for chats with this handle - look for chat_identifier matching handle.id
+        let mut found_chat: Option<Chat> = None;
+        
+        Chat::stream(&db, |chat_result| {
+            match chat_result {
+                Ok(chat) => {
+                    if chat.chat_identifier == handle.id {
+                        found_chat = Some(chat);
+                        return Ok::<(), anyhow::Error>(());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error processing chat: {:?}", e);
+                }
+            }
+            Ok(())
+        }).map_err(|e| anyhow::anyhow!("Failed to stream chats: {}", e))?;
+
+        Ok(found_chat)
     }
 
     // Save messages to database
@@ -292,12 +359,86 @@ impl IMessageDatabaseRepo {
 
 #[async_trait]
 impl MessageRepository for IMessageDatabaseRepo {
-    async fn fetch_messages(&self, _contact: &Contact, _date_range: &DateRange) -> Result<Vec<Message>> {
-        // TODO: Implement proper iMessage database integration with latest API
-        // The API has changed significantly in version 2.3.0
-        // For now, return empty vector to avoid compilation errors
-        // This needs to be updated once we determine the correct API methods
-        Ok(Vec::new())
+    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>> {
+        // Find the handle for this contact
+        let handle = match self.find_handle(contact).await? {
+            Some(h) => h,
+            None => {
+                eprintln!("No handle found for contact: {:?}", contact);
+                return Ok(Vec::new());
+            }
+        };
+
+        // Find the chat for this handle
+        let chat = match self.find_chat_by_handle(&handle).await? {
+            Some(c) => c,
+            None => {
+                eprintln!("No chat found for handle: {:?}", handle);
+                return Ok(Vec::new());
+            }
+        };
+
+        // Create a connection to the iMessage database
+        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+
+        // Get the time offset for date conversion
+        let offset = imessage_database::util::dates::get_offset();
+
+        // Collect messages from the chat
+        let mut messages = Vec::new();
+        
+        ImessageMessage::stream(&db, |message_result| {
+            match message_result {
+                Ok(mut imessage) => {
+                    // Check if this message belongs to our chat
+                    if let Some(chat_id) = imessage.chat_id {
+                        if chat_id == chat.rowid {
+                            // Check date range if specified
+                            if let Some(start_date) = date_range.start {
+                                if let Ok(msg_date) = imessage.date(&offset) {
+                                    if msg_date < start_date {
+                                        return Ok::<(), anyhow::Error>(());
+                                    }
+                                }
+                            }
+                            
+                            if let Some(end_date) = date_range.end {
+                                if let Ok(msg_date) = imessage.date(&offset) {
+                                    if msg_date > end_date {
+                                        return Ok::<(), anyhow::Error>(());
+                                    }
+                                }
+                            }
+
+                            // Store the values we need before calling generate_text
+                            let is_from_me = imessage.is_from_me;
+                            let timestamp = imessage.date(&offset).unwrap_or_else(|_| chrono::Local::now());
+                            
+                            // Generate text for the message
+                            if let Ok(text) = imessage.generate_text(&db) {
+                                // Convert to our Message format
+                                let message = Message {
+                                    sender: if is_from_me {
+                                        "Me".to_string()
+                                    } else {
+                                        contact.name.clone()
+                                    },
+                                    timestamp,
+                                    content: text.to_string(),
+                                };
+                                messages.push(message);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error processing message: {:?}", e);
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        }).map_err(|e| anyhow::anyhow!("Failed to stream messages: {}", e))?;
+
+        Ok(messages)
     }
 
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
