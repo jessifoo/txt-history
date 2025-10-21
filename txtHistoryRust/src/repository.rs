@@ -205,6 +205,138 @@ impl Repository {
     }
 }
 
+#[async_trait::async_trait]
+impl MessageRepository for Repository {
+    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>> {
+        // Get messages from our database for this contact
+        let db_messages = self.db.get_messages_by_contact_name(&contact.name, date_range)?;
+        
+        // db_messages is already Vec<Message>, no conversion needed
+        Ok(db_messages)
+    }
+
+    async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
+        use std::fs::File;
+        use std::io::{BufWriter, Write};
+
+        let file = File::create(path)?;
+        let mut writer = BufWriter::new(file);
+
+        match format {
+            OutputFormat::Txt => {
+                for message in messages {
+                    writeln!(
+                        writer,
+                        "{}, {}, {}\n",
+                        message.sender,
+                        message.timestamp.format("%b %d, %Y %r"),
+                        message.content
+                    )?;
+                }
+            }
+            OutputFormat::Csv => {
+                let mut csv_writer = csv::Writer::from_writer(writer);
+                csv_writer.write_record(&["Sender", "Timestamp", "Content"])?;
+                
+                for message in messages {
+                    csv_writer.write_record(&[
+                        &message.sender,
+                        &message.timestamp.format("%b %d, %Y %r").to_string(),
+                        &message.content,
+                    ])?;
+                }
+                csv_writer.flush()?;
+            }
+            OutputFormat::Json => {
+                let json_messages: Vec<_> = messages
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "sender": m.sender,
+                            "timestamp": m.timestamp.format("%b %d, %Y %r").to_string(),
+                            "content": m.content,
+                        })
+                    })
+                    .collect();
+
+                writeln!(writer, "[")?;
+                for (i, json_message) in json_messages.iter().enumerate() {
+                    if i > 0 {
+                        writeln!(writer, ",")?;
+                    }
+                    writeln!(writer, "{}", json_message)?;
+                }
+                writeln!(writer, "]")?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn export_conversation_by_person(
+        &self, 
+        person_name: &str, 
+        format: OutputFormat, 
+        output_path: &Path, 
+        date_range: &DateRange, 
+        chunk_size: Option<usize>,
+        lines_per_chunk: Option<usize>,
+    ) -> Result<Vec<PathBuf>> {
+        // Get messages for the person
+        let start_date = date_range.start.map(|dt| dt.naive_local());
+        let end_date = date_range.end.map(|dt| dt.naive_local());
+
+        let db_messages = self.db.get_conversation_with_person(
+            person_name,
+            start_date,
+            end_date,
+        )?;
+
+        if db_messages.is_empty() {
+            println!("No messages found for {} in the specified date range", person_name);
+            return Ok(Vec::new());
+        }
+
+        // Convert DbMessage to Message format
+        let messages: Vec<Message> = db_messages
+            .into_iter()
+            .map(|db_msg| Message {
+                content: db_msg.text.unwrap_or_default(),
+                sender: db_msg.sender,
+                timestamp: chrono::DateTime::<chrono::Utc>::from_utc(
+                    db_msg.date_created, 
+                    chrono::Utc
+                ).with_timezone(&chrono::Local),
+            })
+            .collect();
+
+        // Chunk messages based on size or line count
+        let chunks = if let Some(size) = chunk_size {
+            self.chunk_by_lines(&messages, size)
+        } else if let Some(lines) = lines_per_chunk {
+            self.chunk_by_lines(&messages, lines)
+        } else {
+            vec![messages] // No chunking
+        };
+
+        let mut output_files = Vec::new();
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let chunk_num = i + 1;
+            let file_path = if chunks.len() == 1 {
+                output_path.to_path_buf()
+            } else {
+                output_path.with_extension(format!("{}.{}", chunk_num, format.extension()))
+            };
+
+            self.save_messages(chunk, format, &file_path).await?;
+            output_files.push(file_path);
+        }
+
+        Ok(output_files)
+    }
+}
+
 /// Repository for interacting with the iMessage database
 pub struct IMessageDatabaseRepo {
     db_path: PathBuf,

@@ -15,6 +15,7 @@ use crate::db::Database;
 use crate::models::{Contact, DateRange, OutputFormat};
 use crate::nlp::NlpProcessor;
 use crate::repository::MessageRepository;
+use txt_history_rust::validation::InputValidator;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -313,7 +314,10 @@ fn process_messages(
     show_stats: bool,
 ) -> Result<()> {
     // Create NLP processor
-    let processor = NlpProcessor::new(version);
+    // Validate processing version
+    InputValidator::validate_processing_version(version)?;
+    
+    let processor = NlpProcessor::new(version)?;
     println!("Using NLP processor version: {}", version);
 
     // Parse date range

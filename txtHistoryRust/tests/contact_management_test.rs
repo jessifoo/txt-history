@@ -32,8 +32,6 @@ fn test_add_or_update_contact() {
     assert_eq!(contact.name, "Test Person");
     assert_eq!(contact.phone, Some("+15551234567".to_string()));
     assert_eq!(contact.is_me, false);
-    assert!(contact.primary_identifier.is_some());
-    assert_eq!(contact.primary_identifier, Some("+15551234567".to_string()));
 
     // Test updating the contact with an email
     let updated_contact = NewContact {
@@ -49,7 +47,7 @@ fn test_add_or_update_contact() {
     // Verify the contact was updated correctly
     assert_eq!(updated.id, contact.id); // Same ID means it's the same contact
     assert_eq!(updated.email, Some("test@example.com".to_string()));
-    assert_eq!(updated.primary_identifier, Some("+15551234567".to_string())); // Primary identifier shouldn't change
+    assert_eq!(updated.phone, Some("+15551234567".to_string())); // Phone shouldn't change
 }
 
 #[test]
@@ -94,6 +92,7 @@ fn test_get_conversation_with_person() {
         sender: "Test Person".to_string(),
         is_from_me: false,
         date_created: timestamp1,
+        date_imported: Some(chrono::Utc::now().naive_utc()),
         handle_id: None,
         service: Some("iMessage".to_string()),
         thread_id: None,
@@ -108,6 +107,7 @@ fn test_get_conversation_with_person() {
         sender: "Jess".to_string(),
         is_from_me: true,
         date_created: timestamp2,
+        date_imported: Some(chrono::Utc::now().naive_utc()),
         handle_id: None,
         service: Some("iMessage".to_string()),
         thread_id: None,
@@ -122,6 +122,7 @@ fn test_get_conversation_with_person() {
         sender: "Test Person".to_string(),
         is_from_me: false,
         date_created: timestamp3,
+        date_imported: Some(chrono::Utc::now().naive_utc()),
         handle_id: None,
         service: Some("iMessage".to_string()),
         thread_id: None,

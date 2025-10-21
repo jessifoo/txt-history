@@ -3,6 +3,7 @@ pub mod models;
 pub mod nlp;
 pub mod repository;
 pub mod schema;
+pub mod validation;
 
 // Re-export key components for easier access
 pub use db::Database;
