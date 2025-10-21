@@ -1,17 +1,18 @@
 use chrono::NaiveDateTime;
 use std::fs;
 use std::path::Path;
-use tempfile::tempdir;
+// use tempfile::tempdir;
 
 // Import the necessary modules from the crate
-use txtHistoryRust::db::Database;
-use txtHistoryRust::models::{DbContact, DbMessage, NewContact, NewMessage};
+use txt_history_rust::db::Database;
+use txt_history_rust::models::{DbContact, DbMessage, NewContact, NewMessage};
 
 #[test]
 fn test_add_or_update_contact() {
     // Create a temporary database for testing
-    let temp_dir = tempdir().expect("Failed to create temp directory");
-    let db_path = temp_dir.path().join("test.db");
+    let temp_dir = std::env::temp_dir().join("txt_history_test");
+    std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
+    let db_path = temp_dir.join("test.db");
     let db_url = format!("sqlite://{}", db_path.display());
 
     let db = Database::new(&db_url).expect("Failed to create database");
@@ -54,8 +55,9 @@ fn test_add_or_update_contact() {
 #[test]
 fn test_get_conversation_with_person() {
     // Create a temporary database for testing
-    let temp_dir = tempdir().expect("Failed to create temp directory");
-    let db_path = temp_dir.path().join("test.db");
+    let temp_dir = std::env::temp_dir().join("txt_history_test");
+    std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
+    let db_path = temp_dir.join("test.db");
     let db_url = format!("sqlite://{}", db_path.display());
 
     let db = Database::new(&db_url).expect("Failed to create database");

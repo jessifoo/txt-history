@@ -7,13 +7,14 @@ mod schema;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime};
 use clap::{Parser, Subcommand};
-use imessage_database::util::dirs;
+// use imessage_database::util::dirs;
 use repository::IMessageDatabaseRepo;
 use std::path::PathBuf;
 
 use crate::db::Database;
 use crate::models::{Contact, DateRange, OutputFormat};
 use crate::nlp::NlpProcessor;
+use crate::repository::MessageRepository;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -43,7 +44,7 @@ enum Commands {
         format: String,
 
         /// Size of each chunk in MB
-        #[arg(short, long)]
+        #[arg(long)]
         size: Option<f64>,
 
         /// Number of lines per chunk
@@ -73,7 +74,7 @@ enum Commands {
         format: String,
 
         /// Size of each chunk in MB
-        #[arg(short, long)]
+        #[arg(long)]
         size: Option<f64>,
 
         /// Number of lines per chunk
@@ -99,7 +100,7 @@ enum Commands {
         end_date: Option<String>,
 
         /// Size of each chunk in MB
-        #[arg(short, long)]
+        #[arg(long)]
         size: Option<f64>,
 
         /// Number of lines per chunk
@@ -133,7 +134,7 @@ enum Commands {
         batch_size: usize,
 
         /// Show processing statistics
-        #[arg(short, long)]
+        #[arg(long)]
         stats: bool,
     },
 }
@@ -193,8 +194,8 @@ async fn import_messages(
     name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>, lines: Option<usize>,
     output_dir: &str,
 ) -> Result<()> {
-    // Get iMessage database path
-    let chat_db_path = dirs::get_imessage_chat_db_path().context("Failed to locate iMessage database")?;
+    // Get iMessage database path - using a default path for now
+    let chat_db_path = std::path::PathBuf::from("/Users/jessica/Library/Messages/chat.db");
 
     println!("Using iMessage database at: {}", chat_db_path.display());
 

@@ -41,6 +41,7 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 pub type DbConnection = r2d2::PooledConnection<SqliteConnectionManager>;
 
 /// Database manager for handling connections and operations
+#[derive(Clone)]
 pub struct Database {
     pool: DbPool,
 }
@@ -76,8 +77,13 @@ impl Database {
         conn.execute_batch(include_str!("../migrations/2025-03-15-000001_add_processed_messages/up.sql"))
             .context("Failed to run processed_messages migration")?;
 
-        conn.execute_batch(include_str!("../migrations/2025-03-19-000000_enhance_contact_linking/up.sql"))
-            .context("Failed to run contact linking migration")?;
+        // Run contact linking migration with error handling
+        if let Err(e) = conn.execute_batch(include_str!("../migrations/2025-03-19-000000_enhance_contact_linking/up.sql")) {
+            // If columns already exist, that's okay
+            if !e.to_string().contains("duplicate column name") {
+                return Err(e.into());
+            }
+        }
 
         Ok(())
     }

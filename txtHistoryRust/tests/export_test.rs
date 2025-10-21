@@ -1,13 +1,13 @@
 use chrono::NaiveDateTime;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tempfile::tempdir;
+// use tempfile::tempdir;
 use tokio::runtime::Runtime;
 
 // Import the necessary modules from the crate
-use txtHistoryRust::db::Database;
-use txtHistoryRust::models::{Contact, DateRange, DbContact, DbMessage, Message, NewContact, NewMessage, OutputFormat};
-use txtHistoryRust::repository::{IMessageDatabaseRepo, MessageRepository};
+use txt_history_rust::db::Database;
+use txt_history_rust::models::{Contact, DateRange, DbContact, DbMessage, Message, NewContact, NewMessage, OutputFormat};
+use txt_history_rust::repository::{IMessageDatabaseRepo, MessageRepository};
 
 #[test]
 fn test_export_conversation_by_person() {
@@ -15,8 +15,9 @@ fn test_export_conversation_by_person() {
     let rt = Runtime::new().unwrap();
 
     // Create a temporary directory for the test
-    let temp_dir = tempdir().expect("Failed to create temp directory");
-    let db_path = temp_dir.path().join("test.db");
+    let temp_dir = std::env::temp_dir().join("txt_history_test");
+    std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
+    let db_path = temp_dir.join("test.db");
     let db_url = format!("sqlite://{}", db_path.display());
 
     // Create a database and populate it with test data
@@ -54,6 +55,7 @@ fn test_export_conversation_by_person() {
         sender: "Phil".to_string(),
         is_from_me: false,
         date_created: timestamp1,
+        date_imported: Some(chrono::Utc::now().naive_utc()),
         handle_id: None,
         service: Some("iMessage".to_string()),
         thread_id: None,
@@ -68,6 +70,7 @@ fn test_export_conversation_by_person() {
         sender: "Jess".to_string(),
         is_from_me: true,
         date_created: timestamp2,
+        date_imported: Some(chrono::Utc::now().naive_utc()),
         handle_id: None,
         service: Some("iMessage".to_string()),
         thread_id: None,
@@ -82,6 +85,7 @@ fn test_export_conversation_by_person() {
         sender: "Phil".to_string(),
         is_from_me: false,
         date_created: timestamp3,
+        date_imported: Some(chrono::Utc::now().naive_utc()),
         handle_id: None,
         service: Some("iMessage".to_string()),
         thread_id: None,
@@ -118,7 +122,7 @@ fn test_export_conversation_by_person() {
                 .collect::<Vec<_>>()
                 .join("\n\n");
 
-            if format == OutputFormat::Txt {
+            if matches!(format, OutputFormat::Txt) {
                 fs::write(path, content)?;
             } else {
                 // For CSV, just write the same content for simplicity in testing
@@ -149,7 +153,7 @@ fn test_export_conversation_by_person() {
                 .map(|db_msg| Message {
                     content: db_msg.text.unwrap_or_default(),
                     sender: db_msg.sender,
-                    timestamp: chrono::DateTime::<chrono::Local>::from_naive_local(&db_msg.date_created).expect("Invalid timestamp"),
+                    timestamp: chrono::DateTime::<chrono::Local>::from_local(&db_msg.date_created, chrono::Local).expect("Invalid timestamp"),
                 })
                 .collect();
 
@@ -166,7 +170,7 @@ fn test_export_conversation_by_person() {
 
     // Run the export test
     rt.block_on(async {
-        let output_dir = temp_dir.path().join("output");
+        let output_dir = temp_dir.join("output");
         fs::create_dir_all(&output_dir).expect("Failed to create output directory");
 
         let repo = MockRepo::new(db);

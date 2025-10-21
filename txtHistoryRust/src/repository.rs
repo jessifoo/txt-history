@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use crate::{db::Database, models::NewMessage, Message};
+use crate::{db::Database, models::{NewMessage, Message}};
 use crate::models::{Contact, DateRange, OutputFormat};
 
 /// Repository trait for interacting with message data
