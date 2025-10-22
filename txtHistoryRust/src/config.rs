@@ -102,8 +102,6 @@ impl AppConfig {
     /// Load configuration from multiple sources with precedence
     pub fn load() -> Result<Self> {
         let config = Config::builder()
-            // Start with default values
-            .set_defaults(AppConfig::default().into_iter())?
             // Add config file if it exists
             .add_source(File::with_name("config/default").required(false))
             .add_source(File::with_name("config/local").required(false))
@@ -205,48 +203,6 @@ impl AppConfig {
     }
 }
 
-impl IntoIterator for AppConfig {
-    type Item = (String, config::Value);
-    type IntoIter = std::collections::HashMap<String, config::Value>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        let mut map = std::collections::HashMap::new();
-        
-        // Flatten the configuration into key-value pairs
-        map.insert("database.url".to_string(), config::Value::from(self.database.url));
-        map.insert("database.max_connections".to_string(), config::Value::from(self.database.max_connections));
-        map.insert("database.connection_timeout_secs".to_string(), config::Value::from(self.database.connection_timeout_secs));
-        map.insert("database.migration_timeout_secs".to_string(), config::Value::from(self.database.migration_timeout_secs));
-        
-        map.insert("logging.level".to_string(), config::Value::from(self.logging.level));
-        if let Some(file_path) = self.logging.file_path {
-            map.insert("logging.file_path".to_string(), config::Value::from(file_path));
-        }
-        map.insert("logging.max_file_size_mb".to_string(), config::Value::from(self.logging.max_file_size_mb));
-        map.insert("logging.max_files".to_string(), config::Value::from(self.logging.max_files));
-        map.insert("logging.format".to_string(), config::Value::from(self.logging.format));
-        
-        map.insert("nlp.batch_size".to_string(), config::Value::from(self.nlp.batch_size));
-        map.insert("nlp.max_text_length".to_string(), config::Value::from(self.nlp.max_text_length));
-        map.insert("nlp.enable_sentiment".to_string(), config::Value::from(self.nlp.enable_sentiment));
-        map.insert("nlp.enable_ner".to_string(), config::Value::from(self.nlp.enable_ner));
-        map.insert("nlp.enable_language_detection".to_string(), config::Value::from(self.nlp.enable_language_detection));
-        map.insert("nlp.processing_timeout_secs".to_string(), config::Value::from(self.nlp.processing_timeout_secs));
-        
-        map.insert("export.default_format".to_string(), config::Value::from(self.export.default_format));
-        map.insert("export.max_chunk_size_mb".to_string(), config::Value::from(self.export.max_chunk_size_mb));
-        map.insert("export.max_lines_per_chunk".to_string(), config::Value::from(self.export.max_lines_per_chunk));
-        map.insert("export.output_directory".to_string(), config::Value::from(self.export.output_directory));
-        map.insert("export.enable_compression".to_string(), config::Value::from(self.export.enable_compression));
-        
-        map.insert("imessage.database_path".to_string(), config::Value::from(self.imessage.database_path));
-        map.insert("imessage.connection_timeout_secs".to_string(), config::Value::from(self.imessage.connection_timeout_secs));
-        map.insert("imessage.read_timeout_secs".to_string(), config::Value::from(self.imessage.read_timeout_secs));
-        map.insert("imessage.max_retries".to_string(), config::Value::from(self.imessage.max_retries));
-        
-        map.into_iter()
-    }
-}
 
 #[cfg(test)]
 mod tests {

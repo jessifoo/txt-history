@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use tracing::{info, warn, error, debug};
 // use chrono::{Local, TimeZone}; // Unused for now
 use csv::Writer;
 use imessage_database::tables::{
@@ -50,7 +51,7 @@ impl Repository {
         let db_messages = self.db.get_messages_by_contact_name(person_name, date_range)?;
 
         if db_messages.is_empty() {
-            println!("No messages found for {} in the specified date range", person_name);
+            info!("No messages found for {} in the specified date range", person_name);
             return Ok(Vec::new());
         }
 
@@ -293,7 +294,7 @@ impl MessageRepository for Repository {
         )?;
 
         if db_messages.is_empty() {
-            println!("No messages found for {} in the specified date range", person_name);
+            info!("No messages found for {} in the specified date range", person_name);
             return Ok(Vec::new());
         }
 
@@ -377,7 +378,7 @@ impl IMessageDatabaseRepo {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Error processing handle: {:?}", e);
+                        error!("Error processing handle: {:?}", e);
                     }
                 }
                 Ok(())
@@ -401,7 +402,7 @@ impl IMessageDatabaseRepo {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Error processing handle: {:?}", e);
+                        error!("Error processing handle: {:?}", e);
                     }
                 }
                 Ok(())
@@ -433,7 +434,7 @@ impl IMessageDatabaseRepo {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error processing chat: {:?}", e);
+                    error!("Error processing chat: {:?}", e);
                 }
             }
             Ok(())
@@ -496,7 +497,7 @@ impl MessageRepository for IMessageDatabaseRepo {
         let handle = match self.find_handle(contact).await? {
             Some(h) => h,
             None => {
-                eprintln!("No handle found for contact: {:?}", contact);
+                error!("No handle found for contact: {:?}", contact);
                 return Ok(Vec::new());
             }
         };
@@ -505,7 +506,7 @@ impl MessageRepository for IMessageDatabaseRepo {
         let chat = match self.find_chat_by_handle(&handle).await? {
             Some(c) => c,
             None => {
-                eprintln!("No chat found for handle: {:?}", handle);
+                error!("No chat found for handle: {:?}", handle);
                 return Ok(Vec::new());
             }
         };
@@ -564,7 +565,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error processing message: {:?}", e);
+                    error!("Error processing message: {:?}", e);
                 }
             }
             Ok::<(), anyhow::Error>(())

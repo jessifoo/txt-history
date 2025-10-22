@@ -146,12 +146,19 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load configuration
+    let config = AppConfig::load()?;
+    
+    // Initialize logging
+    init_logging(Some(&config.get_log_level()), None)?;
+    
+    info!("Starting txt-history-rust application");
+    
     // Parse command line arguments
     let cli = Cli::parse();
 
-    // Initialize database
+    // Initialize database with configuration
     let db = db::establish_connection()?;
-    db.initialize()?;
 
     // Process command
     match &cli.command {
@@ -163,7 +170,7 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => import_messages(name, start_date, end_date, format, *size, *lines, output_dir).await?,
+        } => import_messages(&config, name, start_date, end_date, format, *size, *lines, output_dir).await?,
         Commands::Query {
             name,
             start_date,
@@ -172,7 +179,7 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => query_messages(&db, name, start_date, end_date, format, *size, *lines, output_dir)?,
+        } => query_messages(&config, &db, name, start_date, end_date, format, *size, *lines, output_dir)?,
         Commands::ExportByPerson {
             name,
             start_date,
@@ -180,7 +187,7 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => export_conversation_by_person(&db, name, start_date, end_date, *size, *lines, output_dir).await?,
+        } => export_conversation_by_person(&config, &db, name, start_date, end_date, *size, *lines, output_dir).await?,
         Commands::Process {
             version,
             name,
@@ -188,7 +195,7 @@ async fn main() -> Result<()> {
             end_date,
             batch_size,
             stats,
-        } => process_messages(&db, version, name, start_date, end_date, *batch_size, *stats)?,
+        } => process_messages(&config, &db, version, name, start_date, end_date, *batch_size, *stats)?,
     }
 
     Ok(())
@@ -196,13 +203,13 @@ async fn main() -> Result<()> {
 
 /// Import messages from iMessage database
 async fn import_messages(
-    name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>, lines: Option<usize>,
+    config: &AppConfig, name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>, lines: Option<usize>,
     output_dir: &str,
 ) -> Result<()> {
-    // Get iMessage database path - using a default path for now
-    let chat_db_path = std::path::PathBuf::from("/Users/jessica/Library/Messages/chat.db");
+    // Get iMessage database path from configuration
+    let chat_db_path = std::path::PathBuf::from(config.get_imessage_db_path());
 
-    println!("Using iMessage database at: {}", chat_db_path.display());
+    info!("Using iMessage database at: {}", chat_db_path.display());
 
     // Create repository
     let repo = IMessageDatabaseRepo::new(chat_db_path)?;
@@ -219,38 +226,44 @@ async fn import_messages(
         "csv" => OutputFormat::Csv,
         "json" => OutputFormat::Json,
         _ => {
-            println!("Invalid format: {}. Using txt as default.", format);
+            warn!("Invalid format: {}. Using txt as default.", format);
             OutputFormat::Txt
         },
     };
 
+    // Use configuration output directory if not provided
+    let effective_output_dir = if output_dir.is_empty() { &config.export.output_directory } else { output_dir };
+    
+    // Create output directory if it doesn't exist
+    std::fs::create_dir_all(effective_output_dir)?;
+
     // Fetch messages
-    println!("Fetching messages for contact: {}", contact.name);
+    info!("Fetching messages for contact: {}", contact.name);
     let messages = repo.fetch_messages(&contact, &date_range).await?;
-    println!("Found {} messages", messages.len());
+    info!("Found {} messages", messages.len());
 
     // Write messages to files
-    write_messages_to_files(&messages, output_format, size, lines, output_dir)?;
+    write_messages_to_files(&messages, output_format, size, lines, effective_output_dir)?;
 
     Ok(())
 }
 
 /// Query messages from the database
 fn query_messages(
-    db: &Database, name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>,
+    config: &AppConfig, db: &Database, name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>,
     lines: Option<usize>, output_dir: &str,
 ) -> Result<()> {
     // Get contact info
     let contact = get_contact_info(name)?;
-    println!("Looking up messages for: {}", contact.name);
+    info!("Looking up messages for: {}", contact.name);
 
     // Parse date range
     let date_range = parse_date_range(start_date, end_date)?;
     if let Some(start) = &date_range.start {
-        println!("Start date: {}", start.format("%Y-%m-%d"));
+        debug!("Start date: {}", start.format("%Y-%m-%d"));
     }
     if let Some(end) = &date_range.end {
-        println!("End date: {}", end.format("%Y-%m-%d"));
+        debug!("End date: {}", end.format("%Y-%m-%d"));
     }
 
     // Determine output format
@@ -259,18 +272,21 @@ fn query_messages(
         "csv" => OutputFormat::Csv,
         "json" => OutputFormat::Json,
         _ => {
-            println!("Invalid format: {}. Using txt as default.", format);
+            warn!("Invalid format: {}. Using txt as default.", format);
             OutputFormat::Txt
         },
     };
 
+    // Use configuration output directory if not provided
+    let effective_output_dir = if output_dir.is_empty() { &config.export.output_directory } else { output_dir };
+    
     // Create output directory if it doesn't exist
-    std::fs::create_dir_all(output_dir)?;
+    std::fs::create_dir_all(effective_output_dir)?;
 
     // Query messages
-    println!("Querying messages...");
+    info!("Querying messages...");
     let messages = db.get_messages_by_contact_name(&contact.name, &date_range)?;
-    println!("Found {} messages", messages.len());
+    info!("Found {} messages", messages.len());
 
     // Write messages to files
     write_messages_to_files(&messages, output_format, size, lines, output_dir)?;
@@ -280,41 +296,44 @@ fn query_messages(
 
 /// Export conversation with a specific person
 async fn export_conversation_by_person(
-    db: &Database, name: &str, start_date: &Option<String>, end_date: &Option<String>, size_mb: Option<f64>,
+    config: &AppConfig, db: &Database, name: &str, start_date: &Option<String>, end_date: &Option<String>, size_mb: Option<f64>,
     lines_per_chunk: Option<usize>, output_dir: &str,
 ) -> Result<()> {
     // Parse date range
     let date_range = parse_date_range(start_date, end_date)?;
 
+    // Use configuration output directory if not provided
+    let effective_output_dir = if output_dir.is_empty() { &config.export.output_directory } else { output_dir };
+    
     // Create output directory if it doesn't exist
-    std::fs::create_dir_all(output_dir)?;
+    std::fs::create_dir_all(effective_output_dir)?;
 
     // Create output path
-    let output_path = std::path::Path::new(output_dir);
+    let output_path = std::path::Path::new(effective_output_dir);
 
     // Create repository
     let repo = repository::Repository::new(db.clone());
 
     // Export conversation
-    println!("Exporting conversation with: {}", name);
+    info!("Exporting conversation with: {}", name);
 
     // Export in both TXT and CSV formats
     let txt_files = repo
         .export_conversation_by_person(name, &date_range, OutputFormat::Txt, size_mb, lines_per_chunk, output_path)
         .await?;
-    println!("Exported {} TXT files", txt_files.len());
+    info!("Exported {} TXT files", txt_files.len());
 
     let csv_files = repo
         .export_conversation_by_person(name, &date_range, OutputFormat::Csv, size_mb, lines_per_chunk, output_path)
         .await?;
-    println!("Exported {} CSV files", csv_files.len());
+    info!("Exported {} CSV files", csv_files.len());
 
     Ok(())
 }
 
 /// Process messages with NLP
 fn process_messages(
-    db: &Database, version: &str, name: &Option<String>, start_date: &Option<String>, end_date: &Option<String>, batch_size: usize,
+    config: &AppConfig, db: &Database, version: &str, name: &Option<String>, start_date: &Option<String>, end_date: &Option<String>, batch_size: usize,
     show_stats: bool,
 ) -> Result<()> {
     // Create NLP processor
@@ -322,7 +341,7 @@ fn process_messages(
     InputValidator::validate_processing_version(version)?;
     
     let processor = NlpProcessor::new(version)?;
-    println!("Using NLP processor version: {}", version);
+    info!("Using NLP processor version: {}", version);
 
     // Parse date range
     let date_range = parse_date_range(start_date, end_date)?;
@@ -337,46 +356,49 @@ fn process_messages(
             None => return Err(anyhow::anyhow!("Contact not found: {}", contact_name)),
         };
 
-        println!("Processing messages for: {}", contact_info.name);
+        info!("Processing messages for: {}", contact_info.name);
 
         // Fetch messages
         let db_messages = db.get_messages(&contact_info.name, start_naive, end_naive)?;
-        println!("Found {} messages to process", db_messages.len());
+        info!("Found {} messages to process", db_messages.len());
 
         // Get message IDs
         db_messages.into_iter().map(|m| m.id).collect::<Vec<_>>()
     } else {
         // Get all unprocessed message IDs
         let unprocessed_ids = db.get_unprocessed_message_ids(version)?;
-        println!("Found {} unprocessed messages", unprocessed_ids.len());
+        info!("Found {} unprocessed messages", unprocessed_ids.len());
         unprocessed_ids
     };
 
     // Process messages in batches
     let total_messages = message_ids.len();
     let mut processed_count = 0;
+    
+    // Use configuration batch size if not provided
+    let effective_batch_size = if batch_size > 0 { batch_size } else { config.nlp.batch_size };
 
-    for chunk in message_ids.chunks(batch_size) {
+    for chunk in message_ids.chunks(effective_batch_size) {
         let batch_ids = chunk.to_vec();
         let batch_size = batch_ids.len();
 
-        println!("Processing batch of {} messages...", batch_size);
+        info!("Processing batch of {} messages...", batch_size);
         let processed = processor.process_messages(db, &batch_ids)?;
 
         processed_count += processed.len();
-        println!("Processed {}/{} messages", processed_count, total_messages);
+        info!("Processed {}/{} messages", processed_count, total_messages);
     }
 
     // Show statistics if requested
     if show_stats {
         let stats = db.get_processing_stats()?;
-        println!("\nProcessing Statistics:");
-        println!("Total messages in database: {}", stats.total_messages);
-        println!("Total processed messages: {}", stats.processed_messages);
-        println!("Processing versions: {:?}", stats.processing_versions);
+        info!("Processing Statistics:");
+        info!("Total messages in database: {}", stats.total_messages);
+        info!("Total processed messages: {}", stats.processed_messages);
+        info!("Processing versions: {:?}", stats.processing_versions);
     }
 
-    println!("\nProcessing complete!");
+    info!("Processing complete!");
     Ok(())
 }
 
@@ -451,7 +473,7 @@ fn write_messages_to_files(
     messages: &[models::Message], format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>, output_dir: &str,
 ) -> Result<()> {
     if messages.is_empty() {
-        println!("No messages to write");
+        warn!("No messages to write");
         return Ok(());
     }
 
@@ -476,7 +498,7 @@ fn write_messages_to_files(
 
     // Create chunks
     let chunks: Vec<_> = messages.chunks(chunk_size).collect();
-    println!("Writing {} chunks", chunks.len());
+    info!("Writing {} chunks", chunks.len());
 
     // Process each chunk
     for (i, chunk) in chunks.iter().enumerate() {
@@ -487,17 +509,17 @@ fn write_messages_to_files(
             OutputFormat::Txt => {
                 let file_path = format!("{}.txt", file_base);
                 write_txt_file(chunk, &file_path)?;
-                println!("Wrote {} messages to {}", chunk.len(), file_path);
+                debug!("Wrote {} messages to {}", chunk.len(), file_path);
             },
             OutputFormat::Csv => {
                 let file_path = format!("{}.csv", file_base);
                 write_csv_file(chunk, &file_path)?;
-                println!("Wrote {} messages to {}", chunk.len(), file_path);
+                debug!("Wrote {} messages to {}", chunk.len(), file_path);
             },
             OutputFormat::Json => {
                 let file_path = format!("{}.json", file_base);
                 write_json_file(chunk, &file_path)?;
-                println!("Wrote {} messages to {}", chunk.len(), file_path);
+                debug!("Wrote {} messages to {}", chunk.len(), file_path);
             },
         }
     }

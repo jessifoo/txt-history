@@ -615,3 +615,4 @@ pub fn establish_connection() -> Result<Database> {
 
     Ok(database)
 }
+
