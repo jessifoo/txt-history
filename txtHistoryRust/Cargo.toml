@@ -28,6 +28,12 @@ rand = "0.8" # Random number generation
 r2d2 = "0.8" # Connection pooling
 thiserror = "1.0" # Error definition
 diesel = { version = "2.2", features = ["sqlite", "chrono"] } # ORM for SQLite
+tracing = "0.1" # Structured logging
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] } # Log formatting
+tracing-appender = "0.2" # Log file rotation
+config = "0.14" # Configuration management
+serde_yaml = "0.9" # YAML configuration support
+metrics = "0.22" # Metrics collection
 
 # We're not using r2d2_sqlite directly, but implementing our own connection pooling
 # r2d2_sqlite = "0.23.0" # SQLite connection pooling

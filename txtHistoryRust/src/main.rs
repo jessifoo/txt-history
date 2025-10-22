@@ -16,6 +16,10 @@ use crate::models::{Contact, DateRange, OutputFormat};
 use crate::nlp::NlpProcessor;
 use crate::repository::MessageRepository;
 use txt_history_rust::validation::InputValidator;
+use txt_history_rust::config::AppConfig;
+use txt_history_rust::logging::{init_logging, OperationTimer};
+use txt_history_rust::metrics::MetricsCollector;
+use tracing::{info, warn, error, debug};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
