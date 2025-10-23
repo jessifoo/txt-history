@@ -388,12 +388,13 @@ impl Database {
         }
 
         // Get messages where the sender is me and the recipient is the person
+        // For now, we'll get all messages where is_from_me = true
+        // In a real implementation, we'd need to track the recipient
         query.push_str(&format!(
-            " UNION SELECT * FROM {} WHERE {} = ? AND {} = ?",
-            "messages", "is_from_me", "sender"
+            " UNION SELECT * FROM {} WHERE {} = ?",
+            "messages", "is_from_me"
         ));
         params.push(Box::new(true));
-        params.push(Box::new("Jess".to_string()));
 
         // Order by date
         query.push_str(&format!(" ORDER BY {} ASC", "date_created"));
