@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::path::Path;
-use tracing::{info, warn, error, debug, Level};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 use tracing_appender::{non_blocking, rolling};
 

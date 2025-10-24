@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{info, warn, error, debug};
+use tracing::info;
 // use chrono::{Local, TimeZone}; // Unused for now
 use csv::Writer;
 use imessage_database::tables::{
@@ -236,7 +236,7 @@ impl MessageRepository for Repository {
                 }
             }
             OutputFormat::Csv => {
-                let mut csv_writer = csv::Writer::from_writer(writer);
+                let mut csv_writer = Writer::from_writer(writer);
                 csv_writer.write_record(&["Sender", "Timestamp", "Content"])?;
                 
                 for message in messages {
@@ -304,10 +304,8 @@ impl MessageRepository for Repository {
             .map(|db_msg| Message {
                 content: db_msg.text.unwrap_or_default(),
                 sender: db_msg.sender,
-                timestamp: chrono::DateTime::<chrono::Utc>::from_utc(
-                    db_msg.date_created, 
-                    chrono::Utc
-                ).with_timezone(&chrono::Local),
+                timestamp: chrono::Utc.from_utc_datetime(&db_msg.date_created)
+                    .with_timezone(&chrono::Local),
             })
             .collect();
 // Chunk messages based on size or line count
@@ -318,11 +316,10 @@ let chunks = if let Some(size_mb) = chunk_size {
     // For now, we cast, but this might need further review of the function signature.
     self.chunk_by_size(&messages, size_mb as f64)
 } else if let Some(lines) = lines_per_chunk {
-        } else if let Some(lines) = lines_per_chunk {
-            self.chunk_by_lines(&messages, lines)
-        } else {
-            vec![messages] // No chunking
-        };
+    self.chunk_by_lines(&messages, lines)
+} else {
+    vec![messages] // No chunking
+};
 
         let mut output_files = Vec::new();
 

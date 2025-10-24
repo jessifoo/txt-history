@@ -7,7 +7,7 @@ mod schema;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime};
 use clap::{Parser, Subcommand};
-// use imessage_database::util::dirs;
+use imessage_database::util::dirs;
 use repository::IMessageDatabaseRepo;
 use std::path::PathBuf;
 
@@ -206,8 +206,14 @@ async fn import_messages(
     config: &AppConfig, name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>, lines: Option<usize>,
     output_dir: &str,
 ) -> Result<()> {
-    // Get iMessage database path from configuration
-    let chat_db_path = std::path::PathBuf::from(config.get_imessage_db_path());
+    // Get iMessage database path from configuration or use dynamic detection
+    let chat_db_path = if config.get_imessage_db_path().is_empty() {
+        // Use dynamic path detection
+        dirs::get_imessage_chat_db_path()
+            .context("Failed to locate iMessage database")?
+    } else {
+        std::path::PathBuf::from(config.get_imessage_db_path())
+    };
 
     info!("Using iMessage database at: {}", chat_db_path.display());
 

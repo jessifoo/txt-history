@@ -27,7 +27,7 @@ export:
   enable_compression: false
 
 imessage:
-  database_path: "/Users/jessica/Library/Messages/chat.db"
+  database_path: ""  # Will be dynamically detected
   connection_timeout_secs: 30
   read_timeout_secs: 60
   max_retries: 3

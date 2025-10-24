@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use config::{Config, ConfigError, Environment, File};
+use config::{Config, Environment, File};
 
 /// Application configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +88,7 @@ impl Default for AppConfig {
                 enable_compression: false,
             },
             imessage: IMessageConfig {
-                database_path: "/Users/jessica/Library/Messages/chat.db".to_string(),
+                database_path: "".to_string(), // Will be dynamically detected
                 connection_timeout_secs: 30,
                 read_timeout_secs: 60,
                 max_retries: 3,
@@ -193,7 +192,15 @@ impl AppConfig {
     /// Get iMessage database path from environment or config
     pub fn get_imessage_db_path(&self) -> String {
         std::env::var("IMESSAGE_DB_PATH")
-            .unwrap_or_else(|_| self.imessage.database_path.clone())
+            .unwrap_or_else(|_| {
+                if self.imessage.database_path.is_empty() {
+                    // Fallback to default macOS path
+                    format!("{}/Library/Messages/chat.db", 
+                        std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string()))
+                } else {
+                    self.imessage.database_path.clone()
+                }
+            })
     }
 
     /// Get log level from environment or config
