@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::info;
-// use chrono::{Local, TimeZone}; // Unused for now
+use tracing::{info, error};
+use chrono::{Local, TimeZone};
 use csv::Writer;
 use imessage_database::tables::{
     chat::Chat,
@@ -23,7 +23,7 @@ pub trait MessageRepository {
     async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>>;
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()>;
     async fn export_conversation_by_person(
-        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<usize>,
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
         lines_per_chunk: Option<usize>,
     ) -> Result<Vec<PathBuf>>;
 }
@@ -305,7 +305,7 @@ impl MessageRepository for Repository {
                 content: db_msg.text.unwrap_or_default(),
                 sender: db_msg.sender,
                 timestamp: chrono::Utc.from_utc_datetime(&db_msg.date_created)
-                    .with_timezone(&chrono::Local),
+                    .with_timezone(&Local),
             })
             .collect();
 // Chunk messages based on size or line count
@@ -631,7 +631,7 @@ impl MessageRepository for IMessageDatabaseRepo {
     }
 
     async fn export_conversation_by_person(
-        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<usize>,
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
         lines_per_chunk: Option<usize>,
     ) -> Result<Vec<PathBuf>> {
         // Get contact by name
@@ -675,7 +675,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                 // Estimate message size (very rough approximation)
                 let message_size = message.sender.len() + message.content.len() + 50; // 50 for timestamp and formatting
 
-                if current_size + message_size > size * 1024 * 1024 && !current_chunk.is_empty() {
+                if current_size + message_size > (size * 1024.0 * 1024.0) as usize && !current_chunk.is_empty() {
                     // Save the current chunk
                     let file_name = format!("chunk_{}.{}", chunk_index, format.extension());
                     let file_path = output_path.join(file_name);
