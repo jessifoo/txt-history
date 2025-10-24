@@ -326,12 +326,12 @@ async fn export_conversation_by_person(
 
     // Export in both TXT and CSV formats
     let txt_files = repo
-        .export_conversation_by_person(name, &date_range, OutputFormat::Txt, size_mb, lines_per_chunk, output_path)
+        .export_conversation_by_person(name, &date_range, OutputFormat::Txt, size_mb, lines_per_chunk, output_path, false)
         .await?;
     info!("Exported {} TXT files", txt_files.len());
 
     let csv_files = repo
-        .export_conversation_by_person(name, &date_range, OutputFormat::Csv, size_mb, lines_per_chunk, output_path)
+        .export_conversation_by_person(name, &date_range, OutputFormat::Csv, size_mb, lines_per_chunk, output_path, false)
         .await?;
     info!("Exported {} CSV files", csv_files.len());
 
@@ -418,26 +418,31 @@ fn get_contact_info(name: &str) -> Result<Contact> {
             name: "Jess".to_string(),
             phone: None,
             email: None,
+            emails: vec![],
         },
         "Phil" => Contact {
             name: "Phil".to_string(),
             phone: Some("+18673335566".to_string()),
             email: Some("apple@phil-g.com".to_string()),
+            emails: vec!["apple@phil-g.com".to_string()],
         },
         "Robert" => Contact {
             name: "Robert".to_string(),
             phone: Some("+17806793467".to_string()),
             email: None,
+            emails: vec![],
         },
         "Rhonda" => Contact {
             name: "Rhonda".to_string(),
             phone: Some("+17803944504".to_string()),
             email: None,
+            emails: vec![],
         },
         "Sherry" => Contact {
             name: "Sherry".to_string(),
             phone: Some("+17807223445".to_string()),
             email: None,
+            emails: vec![],
         },
         _ => {
             return Err(anyhow::anyhow!(

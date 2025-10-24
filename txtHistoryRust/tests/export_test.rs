@@ -134,7 +134,7 @@ fn test_export_conversation_by_person() {
 
         async fn export_conversation_by_person(
             &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
-            lines_per_chunk: Option<usize>,
+            lines_per_chunk: Option<usize>, only_contact: bool,
         ) -> anyhow::Result<Vec<PathBuf>> {
             // Get all messages with this person
             let messages = self.db.get_conversation_with_person(
@@ -148,7 +148,7 @@ fn test_export_conversation_by_person() {
             }
 
             // Convert database messages to the Message format
-            let messages: Vec<Message> = messages
+            let mut messages: Vec<Message> = messages
                 .into_iter()
                 .map(|db_msg| Message {
                     content: db_msg.text.unwrap_or_default(),
@@ -156,6 +156,11 @@ fn test_export_conversation_by_person() {
                     timestamp: chrono::DateTime::<chrono::Utc>::from_utc(db_msg.date_created, chrono::Utc).with_timezone(&chrono::Local),
                 })
                 .collect();
+
+            // Filter to only show contact's messages if requested
+            if only_contact {
+                messages.retain(|msg| msg.sender == person_name);
+            }
 
             // For simplicity in testing, just create one file
             let txt_path = output_path.with_extension("txt");
@@ -178,7 +183,7 @@ fn test_export_conversation_by_person() {
 
         let output_path = output_dir.join("phil_conversation");
         let result = repo
-            .export_conversation_by_person("Jess", OutputFormat::Txt, &output_path, &date_range, None, None)
+            .export_conversation_by_person("Jess", OutputFormat::Txt, &output_path, &date_range, None, None, false)
             .await
             .expect("Export failed");
 

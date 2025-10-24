@@ -24,7 +24,7 @@ pub trait MessageRepository {
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()>;
     async fn export_conversation_by_person(
         &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
-        lines_per_chunk: Option<usize>,
+        lines_per_chunk: Option<usize>, only_contact: bool,
     ) -> Result<Vec<PathBuf>>;
 }
 
@@ -42,17 +42,23 @@ impl Repository {
     /// Export conversation with a specific person
     pub async fn export_conversation_by_person(
         &self, person_name: &str, date_range: &DateRange, format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>,
-        output_path: &Path,
+        output_path: &Path, only_contact: bool,
     ) -> Result<Vec<PathBuf>> {
         // Get messages for the person
         let _start_date = date_range.start.map(|dt| dt.naive_local());
         let _end_date = date_range.end.map(|dt| dt.naive_local());
 
-        let db_messages = self.db.get_messages_by_contact_name(person_name, date_range)?;
+        let mut db_messages = self.db.get_messages_by_contact_name(person_name, date_range)?;
 
         if db_messages.is_empty() {
             info!("No messages found for {} in the specified date range", person_name);
             return Ok(Vec::new());
+        }
+
+        // Filter to only show contact's messages if requested
+        if only_contact {
+            db_messages.retain(|msg| msg.sender == person_name);
+            info!("Filtered to {} messages from {} only", db_messages.len(), person_name);
         }
 
         // Chunk messages based on size or line count
@@ -98,14 +104,14 @@ impl Repository {
         let mut writer = BufWriter::new(file);
 
         for message in messages {
+            // Format like Python script: sender,date,content (no ID column for TXT)
             writeln!(
                 writer,
-                "{}, {}, {}",
+                "{},{},{}",
                 message.sender,
                 message.timestamp.format("%b %d, %Y %r"),
                 message.content
             )?;
-            writeln!(writer)?; // Add blank line between messages
         }
 
         Ok(())
@@ -116,8 +122,13 @@ impl Repository {
         let file = File::create(file_path)?;
         let mut writer = Writer::from_writer(file);
 
-        for message in messages {
+        // Write header row like Python script
+        writer.write_record(&["ID", "Sender", "Datetime", "Message"])?;
+
+        // Add ID column with autoincrementing values starting from 1
+        for (i, message) in messages.iter().enumerate() {
             writer.write_record(&[
+                &(i + 1).to_string(), // ID column
                 &message.sender,
                 &message.timestamp.format("%b %d, %Y %r").to_string(),
                 &message.content,
@@ -282,6 +293,7 @@ impl MessageRepository for Repository {
         date_range: &DateRange, 
         chunk_size: Option<f64>,
         lines_per_chunk: Option<usize>,
+        only_contact: bool,
     ) -> Result<Vec<PathBuf>> {
         // Get messages for the person
         let start_date = date_range.start.map(|dt| dt.naive_local());
@@ -299,7 +311,7 @@ impl MessageRepository for Repository {
         }
 
         // Convert DbMessage to Message format
-        let messages: Vec<Message> = db_messages
+        let mut messages: Vec<Message> = db_messages
             .into_iter()
             .map(|db_msg| Message {
                 content: db_msg.text.unwrap_or_default(),
@@ -308,6 +320,12 @@ impl MessageRepository for Repository {
                     .with_timezone(&Local),
             })
             .collect();
+
+        // Filter to only show contact's messages if requested
+        if only_contact {
+            messages.retain(|msg| msg.sender == person_name);
+            info!("Filtered to {} messages from {} only", messages.len(), person_name);
+        }
 // Chunk messages based on size or line count
 // Default to 0.1 MB if no chunk size is specified
 let default_chunk_size_mb = 0.1;
@@ -324,14 +342,24 @@ let chunks = if let Some(size_mb) = chunk_size {
 
         for (i, chunk) in chunks.iter().enumerate() {
             let chunk_num = i + 1;
-            let file_path = if chunks.len() == 1 {
-                output_path.to_path_buf()
+            
+            // Generate both CSV and TXT files like the Python script
+            let base_path = if chunks.len() == 1 {
+                output_path.parent().unwrap().join(output_path.file_stem().unwrap())
             } else {
-                output_path.with_extension(format!("{}.{}", chunk_num, format.extension()))
+                output_path.parent().unwrap().join(format!("{}_chunk_{}", 
+                    output_path.file_stem().unwrap().to_string_lossy(), chunk_num))
             };
 
-            self.save_messages(chunk, format, &file_path).await?;
-            output_files.push(file_path);
+            // Save CSV file
+            let csv_path = base_path.with_extension("csv");
+            self.save_messages(chunk, OutputFormat::Csv, &csv_path).await?;
+            output_files.push(csv_path);
+
+            // Save TXT file
+            let txt_path = base_path.with_extension("txt");
+            self.save_messages(chunk, OutputFormat::Txt, &txt_path).await?;
+            output_files.push(txt_path);
         }
 
         Ok(output_files)
@@ -632,7 +660,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
     async fn export_conversation_by_person(
         &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
-        lines_per_chunk: Option<usize>,
+        lines_per_chunk: Option<usize>, only_contact: bool,
     ) -> Result<Vec<PathBuf>> {
         // Get contact by name
         let contact = match self.database.get_contact(person_name)? {
@@ -640,12 +668,19 @@ impl MessageRepository for IMessageDatabaseRepo {
                 name: c.name,
                 phone: c.phone,
                 email: c.email,
+                emails: vec![], // Initialize empty emails vector
             },
             None => return Err(anyhow::anyhow!("Contact not found: {}", person_name)),
         };
 
         // Fetch messages
-        let messages = self.fetch_messages(&contact, date_range).await?;
+        let mut messages = self.fetch_messages(&contact, date_range).await?;
+
+        // Filter to only show contact's messages if requested
+        if only_contact {
+            messages.retain(|msg| msg.sender == person_name);
+            info!("Filtered to {} messages from {} only", messages.len(), person_name);
+        }
 
         // If no messages, return early
         if messages.is_empty() {

@@ -15,6 +15,25 @@ pub struct Contact {
     pub name: String,
     pub phone: Option<String>,
     pub email: Option<String>,
+    pub emails: Vec<String>,
+}
+
+impl Contact {
+    /// Get the contact identifiers for iMessage export filter
+    /// Returns a comma-separated string of phone and emails
+    pub fn get_identifiers(&self) -> String {
+        let mut identifiers = Vec::new();
+        
+        if let Some(phone) = &self.phone {
+            identifiers.push(phone.clone());
+        }
+        
+        for email in &self.emails {
+            identifiers.push(email.clone());
+        }
+        
+        identifiers.join(",")
+    }
 }
 
 #[derive(Debug)]
