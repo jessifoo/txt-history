@@ -133,7 +133,7 @@ fn test_export_conversation_by_person() {
         }
 
         async fn export_conversation_by_person(
-            &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<usize>,
+            &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
             lines_per_chunk: Option<usize>,
         ) -> anyhow::Result<Vec<PathBuf>> {
             // Get all messages with this person

@@ -208,9 +208,10 @@ async fn import_messages(
 ) -> Result<()> {
     // Get iMessage database path from configuration or use dynamic detection
     let chat_db_path = if config.get_imessage_db_path().is_empty() {
-        // Use dynamic path detection
-        dirs::get_imessage_chat_db_path()
-            .context("Failed to locate iMessage database")?
+        // Use dynamic path detection - fallback to default macOS path
+        let home_dir = std::env::var("HOME")
+            .unwrap_or_else(|_| "/Users".to_string());
+        std::path::PathBuf::from(format!("{}/Library/Messages/chat.db", home_dir))
     } else {
         std::path::PathBuf::from(config.get_imessage_db_path())
     };
