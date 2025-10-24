@@ -280,7 +280,7 @@ impl MessageRepository for Repository {
         format: OutputFormat, 
         output_path: &Path, 
         date_range: &DateRange, 
-        chunk_size: Option<usize>,
+        chunk_size: Option<f64>,
         lines_per_chunk: Option<usize>,
     ) -> Result<Vec<PathBuf>> {
         // Get messages for the person
@@ -309,16 +309,15 @@ impl MessageRepository for Repository {
             })
             .collect();
 // Chunk messages based on size or line count
+// Default to 0.1 MB if no chunk size is specified
+let default_chunk_size_mb = 0.1;
 let chunks = if let Some(size_mb) = chunk_size {
-    // The original implementation of chunk_by_size expects f64, but the parameter is usize.
-    // Assuming the intent is to use chunk_by_size with a float value.
-    // If chunk_size is meant to be line count, the parameter name is misleading.
-    // For now, we cast, but this might need further review of the function signature.
-    self.chunk_by_size(&messages, size_mb as f64)
+    self.chunk_by_size(&messages, size_mb)
 } else if let Some(lines) = lines_per_chunk {
     self.chunk_by_lines(&messages, lines)
 } else {
-    vec![messages] // No chunking
+    // Default chunking by size (0.1 MB)
+    self.chunk_by_size(&messages, default_chunk_size_mb)
 };
 
         let mut output_files = Vec::new();
