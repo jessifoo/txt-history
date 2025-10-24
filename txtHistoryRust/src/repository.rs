@@ -545,7 +545,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
                             // Store the values we need before calling generate_text
                             let is_from_me = imessage.is_from_me;
-                            let timestamp = imessage.date(&offset).unwrap_or_else(|_| chrono::Local::now());
+                            let timestamp = imessage.date(&offset).unwrap_or_else(|_| Local::now());
                             
                             // Generate text for the message
                             if let Ok(text) = imessage.generate_text(&db) {
