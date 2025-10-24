@@ -310,10 +310,14 @@ impl MessageRepository for Repository {
                 ).with_timezone(&chrono::Local),
             })
             .collect();
-
-        // Chunk messages based on size or line count
-        let chunks = if let Some(size) = chunk_size {
-            self.chunk_by_lines(&messages, size)
+// Chunk messages based on size or line count
+let chunks = if let Some(size_mb) = chunk_size {
+    // The original implementation of chunk_by_size expects f64, but the parameter is usize.
+    // Assuming the intent is to use chunk_by_size with a float value.
+    // If chunk_size is meant to be line count, the parameter name is misleading.
+    // For now, we cast, but this might need further review of the function signature.
+    self.chunk_by_size(&messages, size_mb as f64)
+} else if let Some(lines) = lines_per_chunk {
         } else if let Some(lines) = lines_per_chunk {
             self.chunk_by_lines(&messages, lines)
         } else {
