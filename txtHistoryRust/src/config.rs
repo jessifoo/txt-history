@@ -194,9 +194,21 @@ impl AppConfig {
         std::env::var("IMESSAGE_DB_PATH")
             .unwrap_or_else(|_| {
                 if self.imessage.database_path.is_empty() {
-                    // Fallback to default macOS path
-                    format!("{}/Library/Messages/chat.db", 
-                        std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string()))
+                    // Use platform-agnostic approach - only default to macOS path on macOS
+                    #[cfg(target_os = "macos")]
+                    {
+                        if let Ok(home) = std::env::var("HOME") {
+                            format!("{}/Library/Messages/chat.db", home)
+                        } else {
+                            // No default on macOS without HOME
+                            String::new()
+                        }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        // No default iMessage path on non-macOS systems
+                        String::new()
+                    }
                 } else {
                     self.imessage.database_path.clone()
                 }

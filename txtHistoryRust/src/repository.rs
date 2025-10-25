@@ -161,27 +161,21 @@ impl Repository {
     /// Save messages to a JSON file
     async fn save_json(&self, messages: &[Message], file_path: &Path) -> Result<()> {
         let file = File::create(file_path)?;
-        let mut writer = BufWriter::new(file);
+        let writer = BufWriter::new(file);
 
-        let json_messages: Vec<_> = messages
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "sender": m.sender,
-                    "timestamp": m.timestamp.format("%b %d, %Y %r").to_string(),
-                    "content": m.content,
-                })
-            })
-            .collect();
-
-        writeln!(writer, "[")?;
-        for (i, json_message) in json_messages.iter().enumerate() {
-            if i > 0 {
-                writeln!(writer, ",")?;
-            }
-            writeln!(writer, "{}", json_message)?;
+        // Write JSON directly using serde streaming to avoid intermediate vector
+        use serde::ser::SerializeSeq;
+        let mut ser = serde_json::Serializer::new(writer);
+        let mut seq = ser.serialize_seq(Some(messages.len()))?;
+        
+        for message in messages {
+            seq.serialize_element(&serde_json::json!({
+                "sender": message.sender,
+                "timestamp": message.timestamp.format("%b %d, %Y %r").to_string(),
+                "content": message.content,
+            }))?;
         }
-        writeln!(writer, "]")?;
+        seq.end()?;
 
         Ok(())
     }
@@ -279,25 +273,19 @@ impl MessageRepository for Repository {
                 csv_writer.flush()?;
             }
             OutputFormat::Json => {
-                let json_messages: Vec<_> = messages
-                    .iter()
-                    .map(|m| {
-                        serde_json::json!({
-                            "sender": m.sender,
-                            "timestamp": m.timestamp.format("%b %d, %Y %r").to_string(),
-                            "content": m.content,
-                        })
-                    })
-                    .collect();
-
-                writeln!(writer, "[")?;
-                for (i, json_message) in json_messages.iter().enumerate() {
-                    if i > 0 {
-                        writeln!(writer, ",")?;
-                    }
-                    writeln!(writer, "{}", json_message)?;
+                // Write JSON directly using serde streaming to avoid intermediate vector
+                use serde::ser::SerializeSeq;
+                let mut ser = serde_json::Serializer::new(writer);
+                let mut seq = ser.serialize_seq(Some(messages.len()))?;
+                
+                for message in messages {
+                    seq.serialize_element(&serde_json::json!({
+                        "sender": message.sender,
+                        "timestamp": message.timestamp.format("%b %d, %Y %r").to_string(),
+                        "content": message.content,
+                    }))?;
                 }
-                writeln!(writer, "]")?;
+                seq.end()?;
             }
         }
 
@@ -408,8 +396,8 @@ impl IMessageDatabaseRepo {
             return Err(anyhow::anyhow!("iMessage database path does not exist: {:?}", chat_db_path));
         }
 
-        // Initialize our database
-        let database = Database::new("sqlite:data/messages.db")?;
+        // Initialize our database using environment variable or platform-appropriate default
+        let database = crate::db::establish_connection()?;
 
         Ok(Self {
             db_path: chat_db_path,
@@ -417,56 +405,54 @@ impl IMessageDatabaseRepo {
         })
     }
 
-    // Helper method to find a handle by phone or email
+    // Helper method to find a handle by phone or email using indexed query
     async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
+        // Use direct SQL query with index instead of full table scan
+        // The handle table has an id column which contains phone/email
+        use rusqlite::OptionalExtension;
+        
         // Try to find by phone first
         if let Some(phone) = &contact.phone {
-            let mut found_handle: Option<Handle> = None;
-            
-            Handle::stream(&db, |handle_result| {
-                match handle_result {
-                    Ok(handle) => {
-                        if handle.id == *phone {
-                            found_handle = Some(handle);
-                            return Ok::<(), anyhow::Error>(());
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error processing handle: {:?}", e);
-                    }
-                }
-                Ok(())
-            }).map_err(|e| anyhow::anyhow!("Failed to stream handles: {}", e))?;
+            let query = "SELECT ROWID, id, country, service, uncanonicalized_id FROM handle WHERE id = ? LIMIT 1";
+            let handle: Option<Handle> = db
+                .query_row(query, [phone], |row| {
+                    Ok(Handle {
+                        rowid: row.get(0)?,
+                        id: row.get(1)?,
+                        country: row.get(2).ok(),
+                        service: row.get(3)?,
+                        uncanonicalized_id: row.get(4).ok(),
+                    })
+                })
+                .optional()
+                .map_err(|e| anyhow::anyhow!("Failed to query handle: {}", e))?;
 
-            if found_handle.is_some() {
-                return Ok(found_handle);
+            if handle.is_some() {
+                return Ok(handle);
             }
         }
 
         // Then try by email
         if let Some(email) = &contact.email {
-            let mut found_handle: Option<Handle> = None;
-            
-            Handle::stream(&db, |handle_result| {
-                match handle_result {
-                    Ok(handle) => {
-                        if handle.id == *email {
-                            found_handle = Some(handle);
-                            return Ok::<(), anyhow::Error>(());
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error processing handle: {:?}", e);
-                    }
-                }
-                Ok(())
-            }).map_err(|e| anyhow::anyhow!("Failed to stream handles: {}", e))?;
+            let query = "SELECT ROWID, id, country, service, uncanonicalized_id FROM handle WHERE id = ? LIMIT 1";
+            let handle: Option<Handle> = db
+                .query_row(query, [email], |row| {
+                    Ok(Handle {
+                        rowid: row.get(0)?,
+                        id: row.get(1)?,
+                        country: row.get(2).ok(),
+                        service: row.get(3)?,
+                        uncanonicalized_id: row.get(4).ok(),
+                    })
+                })
+                .optional()
+                .map_err(|e| anyhow::anyhow!("Failed to query handle: {}", e))?;
 
-            if found_handle.is_some() {
-                return Ok(found_handle);
+            if handle.is_some() {
+                return Ok(handle);
             }
         }
 
@@ -474,30 +460,34 @@ impl IMessageDatabaseRepo {
         Ok(None)
     }
 
-    // Helper method to find a chat by handle
+    // Helper method to find a chat by handle using indexed query
     async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
-        // Query for chats with this handle - look for chat_identifier matching handle.id
-        let mut found_chat: Option<Chat> = None;
+        // Use direct SQL query with index instead of full table scan
+        use rusqlite::OptionalExtension;
         
-        Chat::stream(&db, |chat_result| {
-            match chat_result {
-                Ok(chat) => {
-                    if chat.chat_identifier == handle.id {
-                        found_chat = Some(chat);
-                        return Ok::<(), anyhow::Error>(());
-                    }
-                }
-                Err(e) => {
-                    error!("Error processing chat: {:?}", e);
-                }
-            }
-            Ok(())
-        }).map_err(|e| anyhow::anyhow!("Failed to stream chats: {}", e))?;
+        let query = "SELECT ROWID, chat_identifier, service_name, display_name, participants, is_filtered, \
+                            is_recovered, is_blackholed FROM chat WHERE chat_identifier = ? LIMIT 1";
+        
+        let chat: Option<Chat> = db
+            .query_row(query, [&handle.id], |row| {
+                Ok(Chat {
+                    rowid: row.get(0)?,
+                    chat_identifier: row.get(1)?,
+                    service_name: row.get(2).ok(),
+                    display_name: row.get(3).ok(),
+                    participants: vec![], // Will be populated if needed
+                    is_filtered: row.get(4).ok(),
+                    is_recovered: row.get(5).ok(),
+                    is_blackholed: row.get(6).ok(),
+                })
+            })
+            .optional()
+            .map_err(|e| anyhow::anyhow!("Failed to query chat: {}", e))?;
 
-        Ok(found_chat)
+        Ok(chat)
     }
 
     // Save messages to database
@@ -574,59 +564,81 @@ impl MessageRepository for IMessageDatabaseRepo {
         // Get the time offset for date conversion
         let offset = imessage_database::util::dates::get_offset();
 
-        // Collect messages from the chat
-        let mut messages = Vec::new();
+        // Use indexed query instead of full table scan
+        // Query messages by chat_id with date filtering using SQL
+        let mut query = "SELECT ROWID, guid, text, service, handle_id, subject, date, date_read, \
+                                date_delivered, is_from_me, is_read, item_type, group_title, \
+                                group_action_type, associated_message_guid, associated_message_type, \
+                                balloon_bundle_id, expressive_send_style_id, thread_originator_guid, \
+                                thread_originator_part, chat_id, num_attachments, deleted_from, \
+                                num_replies \
+                         FROM message WHERE chat_id = ?".to_string();
         
-        ImessageMessage::stream(&db, |message_result| {
-            match message_result {
-                Ok(mut imessage) => {
-                    // Check if this message belongs to our chat
-                    if let Some(chat_id) = imessage.chat_id {
-                        if chat_id == chat.rowid {
-                            // Check date range if specified
-                            if let Some(start_date) = date_range.start {
-                                if let Ok(msg_date) = imessage.date(&offset) {
-                                    if msg_date < start_date {
-                                        return Ok::<(), anyhow::Error>(());
-                                    }
-                                }
-                            }
-                            
-                            if let Some(end_date) = date_range.end {
-                                if let Ok(msg_date) = imessage.date(&offset) {
-                                    if msg_date > end_date {
-                                        return Ok::<(), anyhow::Error>(());
-                                    }
-                                }
-                            }
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(chat.rowid)];
+        
+        // Add date range filters to the SQL query for better performance
+        if date_range.start.is_some() {
+            query.push_str(" AND date >= ?");
+            // Convert DateTime to Apple's epoch (nanoseconds since 2001-01-01)
+            let apple_epoch = date_range.start.unwrap().timestamp_nanos_opt().unwrap_or(0) / 1_000_000_000 
+                - 978307200; // Offset from 2001-01-01 to 1970-01-01
+            params.push(Box::new(apple_epoch));
+        }
+        
+        if date_range.end.is_some() {
+            query.push_str(" AND date <= ?");
+            let apple_epoch = date_range.end.unwrap().timestamp_nanos_opt().unwrap_or(0) / 1_000_000_000 
+                - 978307200;
+            params.push(Box::new(apple_epoch));
+        }
+        
+        query.push_str(" ORDER BY date ASC");
 
-                            // Store the values we need before calling generate_text
-                            let is_from_me = imessage.is_from_me;
-                            let timestamp = imessage.date(&offset).unwrap_or_else(|_| Local::now());
-                            
-                            // Generate text for the message
-                            if let Ok(text) = imessage.generate_text(&db) {
-                                // Convert to our Message format
-                                let message = Message {
-                                    sender: if is_from_me {
-                                        "Me".to_string()
-                                    } else {
-                                        contact.name.clone()
-                                    },
-                                    timestamp,
-                                    content: text.to_string(),
-                                };
-                                messages.push(message);
-                            }
+        let mut stmt = db.prepare(&query)
+            .map_err(|e| anyhow::anyhow!("Failed to prepare query: {}", e))?;
+        
+        let message_iter = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            // Parse row into ImessageMessage manually for performance
+            let is_from_me: bool = row.get(9)?;
+            let date: i64 = row.get(6)?;
+            let text: Option<String> = row.get(2)?;
+            
+            Ok((is_from_me, date, text))
+        })
+        .map_err(|e| anyhow::anyhow!("Failed to execute query: {}", e))?;
+
+        let mut messages = Vec::new();
+        for result in message_iter {
+            match result {
+                Ok((is_from_me, date_value, text_opt)) => {
+                    // Convert Apple epoch to DateTime
+                    use chrono::TimeZone;
+                    let timestamp = match chrono::Utc.timestamp_opt(date_value + 978307200, 0) {
+                        chrono::LocalResult::Single(dt) => dt.with_timezone(&Local),
+                        _ => {
+                            error!("Failed to parse message date: {}, skipping", date_value);
+                            continue;
                         }
+                    };
+                    
+                    if let Some(text) = text_opt {
+                        let message = Message {
+                            sender: if is_from_me {
+                                "Me".to_string()
+                            } else {
+                                contact.name.clone()
+                            },
+                            timestamp,
+                            content: text,
+                        };
+                        messages.push(message);
                     }
                 }
                 Err(e) => {
-                    error!("Error processing message: {:?}", e);
+                    error!("Error processing message row: {:?}", e);
                 }
             }
-            Ok::<(), anyhow::Error>(())
-        }).map_err(|e| anyhow::anyhow!("Failed to stream messages: {}", e))?;
+        }
 
         Ok(messages)
     }
@@ -669,19 +681,19 @@ impl MessageRepository for IMessageDatabaseRepo {
                 let file = File::create(path)?;
                 let writer = BufWriter::new(file);
 
-                // Convert messages to serializable format
-                let json_messages: Vec<serde_json::Value> = messages
-                    .iter()
-                    .map(|msg| {
-                        serde_json::json!({
-                            "sender": msg.sender,
-                            "timestamp": msg.timestamp.to_rfc3339(),
-                            "content": msg.content
-                        })
-                    })
-                    .collect();
-
-                serde_json::to_writer_pretty(writer, &json_messages)?;
+                // Write JSON directly using serde streaming to avoid intermediate vector
+                use serde::ser::SerializeSeq;
+                let mut ser = serde_json::Serializer::pretty(writer);
+                let mut seq = ser.serialize_seq(Some(messages.len()))?;
+                
+                for msg in messages {
+                    seq.serialize_element(&serde_json::json!({
+                        "sender": msg.sender,
+                        "timestamp": msg.timestamp.to_rfc3339(),
+                        "content": msg.content
+                    }))?;
+                }
+                seq.end()?;
                 Ok(())
             },
         }

@@ -78,10 +78,23 @@ impl Database {
             .context("Failed to run processed_messages migration")?;
 
         // Run contact linking migration with error handling
+        // Use proper SQLite error code checking instead of string matching
         if let Err(e) = conn.execute_batch(include_str!("../migrations/2025-03-19-000000_enhance_contact_linking/up.sql")) {
-            // If columns already exist, that's okay
-            if !e.to_string().contains("duplicate column name") {
-                return Err(e.into());
+            match e {
+                rusqlite::Error::SqliteFailure(ref sqlite_err, ref msg) => {
+                    // SQLite error code 1 (SQLITE_ERROR) with "duplicate column" indicates
+                    // the column already exists, which is safe to ignore
+                    use rusqlite::ffi::SQLITE_ERROR;
+                    if sqlite_err.code == rusqlite::ErrorCode::Unknown && 
+                       sqlite_err.extended_code == SQLITE_ERROR &&
+                       msg.as_ref().map_or(false, |m| m.contains("duplicate column")) {
+                        // Column already exists, safe to ignore
+                        tracing::debug!("Migration already applied (columns exist)");
+                    } else {
+                        return Err(e.into());
+                    }
+                }
+                _ => return Err(e.into()),
             }
         }
 
@@ -605,8 +618,29 @@ pub struct ProcessingStats {
 
 /// Initialize the database connection
 pub fn establish_connection() -> Result<Database> {
-    // Get database URL from environment or use default
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:data/messages.db".to_string());
+    // Get database URL from environment or use default relative to user's home directory
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        // Use platform-agnostic approach for default database path
+        // Try to use XDG_DATA_HOME or equivalent platform directory
+        use std::path::PathBuf;
+        
+        let data_dir = if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
+            PathBuf::from(data_home)
+        } else if let Ok(home) = std::env::var("HOME") {
+            #[cfg(target_os = "macos")]
+            let subdir = "Library/Application Support";
+            #[cfg(not(target_os = "macos"))]
+            let subdir = ".local/share";
+            
+            PathBuf::from(home).join(subdir)
+        } else {
+            // Fallback to current directory if no home directory
+            PathBuf::from(".")
+        };
+        
+        let db_path = data_dir.join("txt_history").join("messages.db");
+        format!("sqlite:{}", db_path.display())
+    });
 
     // Create database connection
     let database = Database::new(&database_url)?;

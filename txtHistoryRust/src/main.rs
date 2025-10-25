@@ -208,10 +208,25 @@ async fn import_messages(
 ) -> Result<()> {
     // Get iMessage database path from configuration or use dynamic detection
     let chat_db_path = if config.get_imessage_db_path().is_empty() {
-        // Use dynamic path detection - fallback to default macOS path
-        let home_dir = std::env::var("HOME")
-            .unwrap_or_else(|_| "/Users".to_string());
-        std::path::PathBuf::from(format!("{}/Library/Messages/chat.db", home_dir))
+        // Use platform-specific path detection
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(home_dir) = std::env::var("HOME") {
+                std::path::PathBuf::from(format!("{}/Library/Messages/chat.db", home_dir))
+            } else {
+                return Err(anyhow::anyhow!(
+                    "iMessage database path not configured and HOME environment variable not set. \
+                    Please set IMESSAGE_DB_PATH environment variable or configure imessage.database_path"
+                ));
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            return Err(anyhow::anyhow!(
+                "iMessage is only available on macOS. Please configure the database path explicitly \
+                via IMESSAGE_DB_PATH environment variable or imessage.database_path in config"
+            ));
+        }
     } else {
         std::path::PathBuf::from(config.get_imessage_db_path())
     };
@@ -587,30 +602,23 @@ fn write_csv_file(messages: &[models::Message], file_path: &str) -> Result<()> {
 /// Write messages to a JSON file
 fn write_json_file(messages: &[models::Message], file_path: &str) -> Result<()> {
     use std::fs::File;
-    use std::io::Write;
 
     let file = File::create(file_path)?;
-    let mut writer = std::io::BufWriter::new(file);
+    let writer = std::io::BufWriter::new(file);
 
-    let json_messages: Vec<_> = messages
-        .iter()
-        .map(|m| {
-            serde_json::json!({
-                "sender": m.sender,
-                "timestamp": m.timestamp.format("%b %d, %Y %r").to_string(),
-                "content": m.content,
-            })
-        })
-        .collect();
-
-    writeln!(writer, "[")?;
-    for (i, json_message) in json_messages.iter().enumerate() {
-        if i > 0 {
-            writeln!(writer, ",")?;
-        }
-        writeln!(writer, "{}", json_message)?;
+    // Write JSON directly using serde streaming to avoid intermediate vector
+    use serde::ser::SerializeSeq;
+    let mut ser = serde_json::Serializer::new(writer);
+    let mut seq = ser.serialize_seq(Some(messages.len()))?;
+    
+    for message in messages {
+        seq.serialize_element(&serde_json::json!({
+            "sender": message.sender,
+            "timestamp": message.timestamp.format("%b %d, %Y %r").to_string(),
+            "content": message.content,
+        }))?;
     }
-    writeln!(writer, "]")?;
+    seq.end()?;
 
     Ok(())
 }
