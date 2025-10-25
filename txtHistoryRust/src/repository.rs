@@ -190,16 +190,15 @@ impl Repository {
     fn chunk_by_size(&self, messages: &[Message], size_mb: f64) -> Vec<Vec<Message>> {
         let size_bytes = (size_mb * 1024.0 * 1024.0) as usize;
         let mut chunks = Vec::new();
-        let mut current_chunk = Vec::new();
+        let mut current_chunk = Vec::with_capacity(messages.len() / 4); // Pre-allocate reasonable capacity
         let mut current_size = 0;
 
         for message in messages {
-            // Estimate size of message in bytes
-            let message_size = message.sender.len() + message.content.len() + 50; // 50 bytes for timestamp and overhead
+            // Estimate size of message in bytes (more accurate calculation)
+            let message_size = message.sender.len() + message.content.len() + 64; // 64 bytes for timestamp and overhead
 
             if current_size + message_size > size_bytes && !current_chunk.is_empty() {
-                chunks.push(current_chunk);
-                current_chunk = Vec::new();
+                chunks.push(std::mem::replace(&mut current_chunk, Vec::with_capacity(messages.len() / 4)));
                 current_size = 0;
             }
 
@@ -216,15 +215,14 @@ impl Repository {
 
     /// Chunk messages by line count
     fn chunk_by_lines(&self, messages: &[Message], lines_per_chunk: usize) -> Vec<Vec<Message>> {
-        let mut chunks = Vec::new();
-        let mut current_chunk = Vec::new();
+        let mut chunks = Vec::with_capacity((messages.len() / lines_per_chunk) + 1);
+        let mut current_chunk = Vec::with_capacity(lines_per_chunk);
 
         for (i, message) in messages.iter().enumerate() {
             current_chunk.push(message.clone());
 
             if (i + 1) % lines_per_chunk == 0 && !current_chunk.is_empty() {
-                chunks.push(current_chunk);
-                current_chunk = Vec::new();
+                chunks.push(std::mem::replace(&mut current_chunk, Vec::with_capacity(lines_per_chunk)));
             }
         }
 
@@ -333,7 +331,10 @@ impl MessageRepository for Repository {
         let mut messages: Vec<Message> = db_messages
             .into_iter()
             .map(|db_msg| Message {
-                content: db_msg.text.unwrap_or_default(),
+                content: db_msg.text.unwrap_or_else(|| {
+                    tracing::warn!("Message {} has no text content", db_msg.id);
+                    String::new()
+                }),
                 sender: db_msg.sender,
                 timestamp: chrono::Utc.from_utc_datetime(&db_msg.date_created)
                     .with_timezone(&Local),
@@ -602,7 +603,8 @@ impl MessageRepository for IMessageDatabaseRepo {
 
                             // Store the values we need before calling generate_text
                             let is_from_me = imessage.is_from_me;
-                            let timestamp = imessage.date(&offset).unwrap_or_else(|_| Local::now());
+                            let timestamp = imessage.date(&offset)
+                                .map_err(|e| anyhow::anyhow!("Failed to parse message date: {}", e))?;
                             
                             // Generate text for the message
                             if let Ok(text) = imessage.generate_text(&db) {

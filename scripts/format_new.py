@@ -29,7 +29,8 @@ except ImportError:
     from utils import format_date_to_iso, is_date_in_future
 
 # Constants
-EXPORT_PATH = Path("/Users/jessicajohnson/imessage-export")
+# Get export path from environment or use default
+EXPORT_PATH = Path(os.environ.get("IMESSAGE_EXPORT_PATH", str(Path.home() / "imessage-export")))
 
 
 @dataclass
