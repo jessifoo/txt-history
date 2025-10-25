@@ -61,27 +61,46 @@ impl Repository {
             info!("Filtered to {} messages from {} only", db_messages.len(), person_name);
         }
 
+        // db_messages are already in Message format
+        let messages = db_messages;
+
+        // Generate date range string for file naming
+        let date_range_str = if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
+            let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
+            let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
+            format!("{}_{}", start_date, end_date)
+        } else {
+            "no_messages".to_string()
+        };
+
         // Chunk messages based on size or line count
         let chunks = if let Some(size) = size_mb {
-            self.chunk_by_size(&db_messages, size)
+            self.chunk_by_size(&messages, size)
         } else if let Some(lines) = lines_per_chunk {
-            self.chunk_by_lines(&db_messages, lines)
+            self.chunk_by_lines(&messages, lines)
         } else {
-            vec![db_messages] // No chunking
+            vec![messages] // No chunking
         };
 
         let mut output_files = Vec::new();
 
         for (i, chunk) in chunks.iter().enumerate() {
-            // Create output file path
-            let file_name = format!("chunk_{}.{}", i + 1, format.extension());
-            let file_path = output_path.join(file_name);
+            let chunk_num = i + 1;
+            
+            // Generate file names with contact name and date range
+            let base_name = if chunks.len() == 1 {
+                format!("{}_{}", person_name, date_range_str)
+            } else {
+                format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_num)
+            };
+
+            let base_path = output_path.join(base_name);
 
             // Save messages to file
-            self.save_messages(chunk, format, &file_path).await?;
+            self.save_messages(chunk, format, &base_path).await?;
 
             // Add to output files
-            output_files.push(file_path);
+            output_files.push(base_path);
         }
 
         Ok(output_files)
@@ -340,16 +359,26 @@ let chunks = if let Some(size_mb) = chunk_size {
 
         let mut output_files = Vec::new();
 
+        // Generate date range string for file naming
+        let date_range_str = if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
+            let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
+            let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
+            format!("{}_{}", start_date, end_date)
+        } else {
+            "no_messages".to_string()
+        };
+
         for (i, chunk) in chunks.iter().enumerate() {
             let chunk_num = i + 1;
             
-            // Generate both CSV and TXT files like the Python script
-            let base_path = if chunks.len() == 1 {
-                output_path.parent().unwrap().join(output_path.file_stem().unwrap())
+            // Generate file names with contact name and date range
+            let base_name = if chunks.len() == 1 {
+                format!("{}_{}", person_name, date_range_str)
             } else {
-                output_path.parent().unwrap().join(format!("{}_chunk_{}", 
-                    output_path.file_stem().unwrap().to_string_lossy(), chunk_num))
+                format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_num)
             };
+
+            let base_path = output_path.parent().unwrap().join(base_name);
 
             // Save CSV file
             let csv_path = base_path.with_extension("csv");
@@ -687,6 +716,15 @@ impl MessageRepository for IMessageDatabaseRepo {
             return Err(anyhow::anyhow!("No messages found for contact: {}", person_name));
         }
 
+        // Generate date range string for file naming
+        let date_range_str = if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
+            let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
+            let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
+            format!("{}_{}", start_date, end_date)
+        } else {
+            "no_messages".to_string()
+        };
+
         // Create output files
         let mut output_files = Vec::new();
         
@@ -694,11 +732,16 @@ impl MessageRepository for IMessageDatabaseRepo {
         if let Some(lines) = lines_per_chunk {
             // Chunk by line count
             for (i, chunk) in messages.chunks(lines).enumerate() {
-                let file_name = format!("chunk_{}.{}", i + 1, format.extension());
-                let file_path = output_path.join(file_name);
+                let chunk_num = i + 1;
+                let base_name = if messages.len() <= lines {
+                    format!("{}_{}", person_name, date_range_str)
+                } else {
+                    format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_num)
+                };
+                let base_path = output_path.join(base_name);
                 
-                self.save_messages(chunk, format, &file_path).await?;
-                output_files.push(file_path);
+                self.save_messages(chunk, format, &base_path).await?;
+                output_files.push(base_path);
             }
         } else if let Some(size) = chunk_size {
             // Chunk by approximate size (in bytes)
@@ -712,11 +755,11 @@ impl MessageRepository for IMessageDatabaseRepo {
 
                 if current_size + message_size > (size * 1024.0 * 1024.0) as usize && !current_chunk.is_empty() {
                     // Save the current chunk
-                    let file_name = format!("chunk_{}.{}", chunk_index, format.extension());
-                    let file_path = output_path.join(file_name);
+                    let base_name = format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_index);
+                    let base_path = output_path.join(base_name);
                     
-                    self.save_messages(&current_chunk, format, &file_path).await?;
-                    output_files.push(file_path);
+                    self.save_messages(&current_chunk, format, &base_path).await?;
+                    output_files.push(base_path);
                     
                     // Start a new chunk
                     current_chunk = Vec::new();
@@ -730,19 +773,23 @@ impl MessageRepository for IMessageDatabaseRepo {
 
             // Save the last chunk if not empty
             if !current_chunk.is_empty() {
-                let file_name = format!("chunk_{}.{}", chunk_index, format.extension());
-                let file_path = output_path.join(file_name);
+                let base_name = if chunk_index == 1 {
+                    format!("{}_{}", person_name, date_range_str)
+                } else {
+                    format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_index)
+                };
+                let base_path = output_path.join(base_name);
                 
-                self.save_messages(&current_chunk, format, &file_path).await?;
-                output_files.push(file_path);
+                self.save_messages(&current_chunk, format, &base_path).await?;
+                output_files.push(base_path);
             }
         } else {
             // No chunking, just one file with all messages
-            let file_name = format!("conversation.{}", format.extension());
-            let file_path = output_path.join(file_name);
+            let base_name = format!("{}_{}", person_name, date_range_str);
+            let base_path = output_path.join(base_name);
             
-            self.save_messages(&messages, format, &file_path).await?;
-            output_files.push(file_path);
+            self.save_messages(&messages, format, &base_path).await?;
+            output_files.push(base_path);
         }
 
         Ok(output_files)
