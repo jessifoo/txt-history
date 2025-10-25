@@ -74,7 +74,9 @@ async def run_imessage_exporter(
         FileNotFoundError: If the export produces no output
         RuntimeError: If the export folder is empty after successful command execution
     """
-    base_command = ["/opt/homebrew/bin/imessage-exporter", "-f", "txt", "-c", "disabled", "-m", "Jess"]
+    # Get imessage-exporter path from environment or use default
+    imessage_exporter_path = os.environ.get("IMESSAGE_EXPORTER_PATH", "/opt/homebrew/bin/imessage-exporter")
+    base_command = [imessage_exporter_path, "-f", "txt", "-c", "disabled", "-m", "Jess"]
 
     if date:
         base_command.extend(["-s", date])

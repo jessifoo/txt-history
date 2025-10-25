@@ -77,13 +77,49 @@ impl Database {
         conn.execute_batch(include_str!("../migrations/2025-03-15-000001_add_processed_messages/up.sql"))
             .context("Failed to run processed_messages migration")?;
 
-        // Run contact linking migration with error handling
+        // Run contact linking migration with proper error handling
         if let Err(e) = conn.execute_batch(include_str!("../migrations/2025-03-19-000000_enhance_contact_linking/up.sql")) {
-            // If columns already exist, that's okay
-            if !e.to_string().contains("duplicate column name") {
-                return Err(e.into());
+            // Check for specific SQLite error codes instead of string matching
+            match e {
+                rusqlite::Error::SqliteFailure(sqlite_err, _) => {
+                    // SQLite error code 1 is SQLITE_ERROR, but we need to check the extended code
+                    // SQLITE_CONSTRAINT_UNIQUE = 2067, but we'll check for constraint violations
+                    if sqlite_err.code != rusqlite::ErrorCode::ConstraintViolation {
+                        return Err(e.into());
+                    }
+                    // If it's a constraint violation, it might be a duplicate column, which is okay
+                }
+                _ => return Err(e.into()),
             }
         }
+
+        // Create performance indexes
+        Self::create_indexes(conn)?;
+
+        Ok(())
+    }
+
+    /// Create database indexes for performance
+    fn create_indexes(conn: &Connection) -> Result<()> {
+        // Index on messages.sender for contact queries
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender)", [])?;
+        
+        // Index on messages.date_created for date range queries
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_date_created ON messages(date_created)", [])?;
+        
+        // Composite index for sender + date queries
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_sender_date ON messages(sender, date_created)", [])?;
+        
+        // Index on messages.imessage_id for duplicate detection
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_imessage_id ON messages(imessage_id)", [])?;
+        
+        // Index on contacts.name for contact lookups
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(name)", [])?;
+        
+        // Index on processed_messages for processing queries
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_processed_messages_original_id ON processed_messages(original_message_id)", [])?;
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_processed_messages_version ON processed_messages(processing_version)", [])?;
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_processed_messages_original_version ON processed_messages(original_message_id, processing_version)", [])?;
 
         Ok(())
     }
@@ -109,20 +145,17 @@ impl Database {
 
     /// Ensure a contact exists in the database
     fn ensure_contact(&self, conn: &Connection, name: &str, phone: Option<&str>, email: Option<&str>, is_me: bool) -> Result<DbContact> {
-        // Check if contact exists
+        // Check if contact exists using prepared statement
         let contact_exists: bool = conn.query_row(
-            &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE {} = ?)", "contacts", "name"),
+            "SELECT EXISTS(SELECT 1 FROM contacts WHERE name = ?)",
             params![name],
             |row| row.get(0),
         )?;
 
         if !contact_exists {
-            // Insert new contact
+            // Insert new contact using prepared statement
             conn.execute(
-                &format!(
-                    "INSERT INTO {} ({}, {}, {}, {}) VALUES (?, ?, ?, ?)",
-                    "contacts", "name", "phone", "email", "is_me"
-                ),
+                "INSERT INTO contacts (name, phone, email, is_me) VALUES (?, ?, ?, ?)",
                 params![name, phone.map(ToString::to_string), email.map(ToString::to_string), is_me],
             )?;
         }
@@ -135,10 +168,10 @@ impl Database {
     pub fn add_message(&self, new_message: NewMessage) -> Result<DbMessage> {
         let conn = self.get_connection()?;
 
-        // Check if message already exists
+        // Check if message already exists using prepared statement
         let existing: Option<DbMessage> = conn
             .query_row(
-                &format!("SELECT * FROM {} WHERE {} = ?", "messages", "imessage_id"),
+                "SELECT * FROM messages WHERE imessage_id = ?",
                 params![new_message.imessage_id],
                 |row| self.map_db_message(row),
             )
@@ -152,21 +185,7 @@ impl Database {
             let date_imported = new_message.date_imported.unwrap_or_else(|| Utc::now().naive_utc());
 
             conn.execute(
-                &format!(
-                    "INSERT INTO {} ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    "messages",
-                    "imessage_id",
-                    "text",
-                    "sender",
-                    "is_from_me",
-                    "date_created",
-                    "date_imported",
-                    "handle_id",
-                    "service",
-                    "thread_id",
-                    "has_attachments",
-                    "contact_id"
-                ),
+                "INSERT INTO messages (imessage_id, text, sender, is_from_me, date_created, date_imported, handle_id, service, thread_id, has_attachments, contact_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     new_message.imessage_id,
                     new_message.text,
@@ -209,27 +228,22 @@ impl Database {
     ) -> Result<Vec<DbMessage>> {
         let conn = self.get_connection()?;
 
-        // Build query
-        let mut query = String::from(format!("SELECT * FROM {} WHERE {} = ?", "messages", "sender"));
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(contact_name.to_string())];
+        // Build query with proper indexing hints
+        let query = match (start_date, end_date) {
+            (Some(_), Some(_)) => "SELECT * FROM messages WHERE sender = ? AND date_created >= ? AND date_created <= ? ORDER BY date_created ASC",
+            (Some(_), None) => "SELECT * FROM messages WHERE sender = ? AND date_created >= ? ORDER BY date_created ASC",
+            (None, Some(_)) => "SELECT * FROM messages WHERE sender = ? AND date_created <= ? ORDER BY date_created ASC",
+            (None, None) => "SELECT * FROM messages WHERE sender = ? ORDER BY date_created ASC",
+        };
 
-        // Apply date filters if provided
-        if let Some(start) = start_date {
-            query.push_str(&format!(" AND {} >= ?", "date_created"));
-            params.push(Box::new(start));
-        }
-
-        if let Some(end) = end_date {
-            query.push_str(&format!(" AND {} <= ?", "date_created"));
-            params.push(Box::new(end));
-        }
-
-        // Order by date
-        query.push_str(&format!(" ORDER BY {} ASC", "date_created"));
-
-        // Execute query
-        let mut stmt = conn.prepare(&query)?;
-        let message_iter = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| self.map_db_message(row))?;
+        // Execute query with proper parameters
+        let mut stmt = conn.prepare(query)?;
+        let message_iter = match (start_date, end_date) {
+            (Some(start), Some(end)) => stmt.query_map(params![contact_name, start, end], |row| self.map_db_message(row))?,
+            (Some(start), None) => stmt.query_map(params![contact_name, start], |row| self.map_db_message(row))?,
+            (None, Some(end)) => stmt.query_map(params![contact_name, end], |row| self.map_db_message(row))?,
+            (None, None) => stmt.query_map(params![contact_name], |row| self.map_db_message(row))?,
+        };
 
         let mut results = Vec::new();
         for message in message_iter {
@@ -274,7 +288,7 @@ impl Database {
 
         let message = conn
             .query_row(
-                &format!("SELECT * FROM {} WHERE {} = ?", "messages", "id"),
+                "SELECT * FROM messages WHERE id = ?",
                 params![message_id],
                 |row| self.map_db_message(row),
             )
@@ -289,7 +303,7 @@ impl Database {
 
         let contact = conn
             .query_row(
-                &format!("SELECT * FROM {} WHERE {} = ?", "contacts", "name"),
+                "SELECT * FROM contacts WHERE name = ?",
                 params![name],
                 |row| self.map_db_contact(row),
             )
@@ -305,7 +319,7 @@ impl Database {
         // Check if contact already exists by name
         let existing: Option<DbContact> = conn
             .query_row(
-                &format!("SELECT * FROM {} WHERE {} = ? AND {} = ?", "contacts", "name", "is_me"),
+                "SELECT * FROM contacts WHERE name = ? AND is_me = ?",
                 params![new_contact.name, new_contact.is_me],
                 |row| self.map_db_contact(row),
             )
@@ -334,7 +348,7 @@ impl Database {
                 // Add the contact ID for the WHERE clause
                 update_params.push(Box::new(contact.id));
 
-                let query = format!("UPDATE {} SET {} WHERE {} = ?", "contacts", update_fields.join(", "), "id");
+                let query = format!("UPDATE contacts SET {} WHERE id = ?", update_fields.join(", "));
 
                 conn.execute(&query, rusqlite::params_from_iter(update_params.iter()))?;
 
@@ -348,10 +362,7 @@ impl Database {
         } else {
             // Insert new contact
             conn.execute(
-                &format!(
-                    "INSERT INTO {} ({}, {}, {}, {}) VALUES (?, ?, ?, ?)",
-                    "contacts", "name", "phone", "email", "is_me"
-                ),
+                "INSERT INTO contacts (name, phone, email, is_me) VALUES (?, ?, ?, ?)",
                 params![new_contact.name, new_contact.phone, new_contact.email, new_contact.is_me],
             )?;
 
@@ -372,36 +383,23 @@ impl Database {
             .get_contact(person_name)?
             .ok_or_else(|| anyhow::anyhow!("Contact not found: {}", person_name))?;
 
-        // Get messages where the sender is the person
-        let mut query = format!("SELECT * FROM {} WHERE {} = ?", "messages", "sender");
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(person_name.to_string())];
+        // Get messages where the sender is the person or where I sent messages
+        // Use a more efficient query with proper indexing
+        let query = match (start_date, end_date) {
+            (Some(_), Some(_)) => "SELECT * FROM messages WHERE (sender = ? OR is_from_me = ?) AND date_created >= ? AND date_created <= ? ORDER BY date_created ASC",
+            (Some(_), None) => "SELECT * FROM messages WHERE (sender = ? OR is_from_me = ?) AND date_created >= ? ORDER BY date_created ASC",
+            (None, Some(_)) => "SELECT * FROM messages WHERE (sender = ? OR is_from_me = ?) AND date_created <= ? ORDER BY date_created ASC",
+            (None, None) => "SELECT * FROM messages WHERE (sender = ? OR is_from_me = ?) ORDER BY date_created ASC",
+        };
 
-        // Apply date filters if provided
-        if let Some(start) = start_date {
-            query.push_str(&format!(" AND {} >= ?", "date_created"));
-            params.push(Box::new(start));
-        }
-
-        if let Some(end) = end_date {
-            query.push_str(&format!(" AND {} <= ?", "date_created"));
-            params.push(Box::new(end));
-        }
-
-        // Get messages where the sender is me and the recipient is the person
-        // For now, we'll get all messages where is_from_me = true
-        // In a real implementation, we'd need to track the recipient
-        query.push_str(&format!(
-            " UNION SELECT * FROM {} WHERE {} = ?",
-            "messages", "is_from_me"
-        ));
-        params.push(Box::new(true));
-
-        // Order by date
-        query.push_str(&format!(" ORDER BY {} ASC", "date_created"));
-
-        // Execute query
-        let mut stmt = conn.prepare(&query)?;
-        let message_iter = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| self.map_db_message(row))?;
+        // Execute query with proper parameters
+        let mut stmt = conn.prepare(query)?;
+        let message_iter = match (start_date, end_date) {
+            (Some(start), Some(end)) => stmt.query_map(params![person_name, true, start, end], |row| self.map_db_message(row))?,
+            (Some(start), None) => stmt.query_map(params![person_name, true, start], |row| self.map_db_message(row))?,
+            (None, Some(end)) => stmt.query_map(params![person_name, true, end], |row| self.map_db_message(row))?,
+            (None, None) => stmt.query_map(params![person_name, true], |row| self.map_db_message(row))?,
+        };
 
         let mut results = Vec::new();
         for message in message_iter {
@@ -418,10 +416,7 @@ impl Database {
         // Check if processed message already exists
         let existing: Option<DbProcessedMessage> = conn
             .query_row(
-                &format!(
-                    "SELECT * FROM {} WHERE {} = ? AND {} = ?",
-                    "processed_messages", "original_message_id", "processing_version"
-                ),
+                "SELECT * FROM processed_messages WHERE original_message_id = ? AND processing_version = ?",
                 params![new_processed.original_message_id, new_processed.processing_version],
                 |row| self.map_db_processed_message(row),
             )
@@ -435,18 +430,7 @@ impl Database {
             let now = Utc::now().naive_utc();
 
             conn.execute(
-                &format!(
-                    "INSERT INTO {} ({}, {}, {}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    "processed_messages",
-                    "original_message_id",
-                    "processed_text",
-                    "tokens",
-                    "lemmatized_text",
-                    "named_entities",
-                    "sentiment_score",
-                    "processed_at",
-                    "processing_version"
-                ),
+                "INSERT INTO processed_messages (original_message_id, processed_text, tokens, lemmatized_text, named_entities, sentiment_score, processed_at, processing_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     new_processed.original_message_id,
                     new_processed.processed_text,
@@ -498,10 +482,7 @@ impl Database {
 
         let processed = conn
             .query_row(
-                &format!(
-                    "SELECT * FROM {} WHERE {} = ? AND {} = ?",
-                    "processed_messages", "original_message_id", "processing_version"
-                ),
+                "SELECT * FROM processed_messages WHERE original_message_id = ? AND processing_version = ?",
                 params![message_id, version],
                 |row| self.map_db_processed_message(row),
             )
@@ -514,10 +495,7 @@ impl Database {
     pub fn get_processed_messages_by_version(&self, version: &str) -> Result<Vec<DbProcessedMessage>> {
         let conn = self.get_connection()?;
 
-        let mut stmt = conn.prepare(&format!(
-            "SELECT * FROM {} WHERE {} = ?",
-            "processed_messages", "processing_version"
-        ))?;
+        let mut stmt = conn.prepare("SELECT * FROM processed_messages WHERE processing_version = ?")?;
 
         let processed_iter = stmt.query_map(params![version], |row| self.map_db_processed_message(row))?;
 
@@ -533,10 +511,7 @@ impl Database {
     pub fn get_unprocessed_message_ids(&self, version: &str) -> Result<Vec<i32>> {
         let conn = self.get_connection()?;
 
-        let query = format!(
-            "SELECT m.{} FROM {} m LEFT JOIN {} p ON m.{} = p.{} AND p.{} = ? WHERE p.{} IS NULL",
-            "id", "messages", "processed_messages", "id", "original_message_id", "processing_version", "id"
-        );
+        let query = "SELECT m.id FROM messages m LEFT JOIN processed_messages p ON m.id = p.original_message_id AND p.processing_version = ? WHERE p.id IS NULL";
 
         let mut stmt = conn.prepare(&query)?;
         let id_iter = stmt.query_map(params![version], |row| row.get::<_, i32>(0))?;
@@ -554,15 +529,15 @@ impl Database {
         let conn = self.get_connection()?;
 
         // Get total message count
-        let total_messages: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {}", "messages"), params![], |row| row.get(0))?;
+        let total_messages: i64 = conn.query_row("SELECT COUNT(*) FROM messages", params![], |row| row.get(0))?;
 
         // Get processed message count
-        let processed_messages: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {}", "processed_messages"), params![], |row| {
+        let processed_messages: i64 = conn.query_row("SELECT COUNT(*) FROM processed_messages", params![], |row| {
             row.get(0)
         })?;
 
         // Get unique processing versions
-        let mut stmt = conn.prepare(&format!("SELECT DISTINCT {} FROM {}", "processing_version", "processed_messages"))?;
+        let mut stmt = conn.prepare("SELECT DISTINCT processing_version FROM processed_messages")?;
 
         let version_iter = stmt.query_map(params![], |row| row.get::<_, String>(0))?;
 
