@@ -37,11 +37,11 @@ impl MetricsCollector {
     /// Record database operation metrics
     pub fn record_db_operation(&mut self, operation: &str, duration: Duration, success: bool) {
         self.db_operations_total += 1;
-        
+
         if !success {
             self.errors_total += 1;
         }
-        
+
         // Log the operation for now (in a real implementation, this would go to a metrics system)
         tracing::debug!(
             operation = operation,
@@ -54,7 +54,7 @@ impl MetricsCollector {
     /// Record message processing metrics
     pub fn record_message_processing(&mut self, count: usize, duration: Duration, operation: &str) {
         self.messages_processed_total += count as u64;
-        
+
         tracing::debug!(
             operation = operation,
             count = count,
@@ -66,29 +66,26 @@ impl MetricsCollector {
     /// Record message import metrics
     pub fn record_message_import(&mut self, count: usize, source: &str) {
         self.messages_imported_total += count as u64;
-        
-        tracing::info!(
-            source = source,
-            count = count,
-            "Messages imported"
-        );
+
+        tracing::info!(source = source, count = count, "Messages imported");
     }
 
     /// Record message export metrics
     pub fn record_message_export(&mut self, count: usize, format: &str) {
         self.messages_exported_total += count as u64;
-        
-        tracing::info!(
-            format = format,
-            count = count,
-            "Messages exported"
-        );
+
+        tracing::info!(format = format, count = count, "Messages exported");
     }
 
     /// Record NLP processing metrics
-    pub fn record_nlp_processing(&mut self, batch_size: usize, duration: Duration, operation: &str) {
+    pub fn record_nlp_processing(
+        &mut self,
+        batch_size: usize,
+        duration: Duration,
+        operation: &str,
+    ) {
         self.nlp_operations_total += 1;
-        
+
         tracing::debug!(
             operation = operation,
             batch_size = batch_size,
@@ -107,9 +104,15 @@ impl MetricsCollector {
     }
 
     /// Record export operation metrics
-    pub fn record_export_operation(&mut self, format: &str, file_count: usize, total_size_bytes: u64, duration: Duration) {
+    pub fn record_export_operation(
+        &mut self,
+        format: &str,
+        file_count: usize,
+        total_size_bytes: u64,
+        duration: Duration,
+    ) {
         self.export_operations_total += 1;
-        
+
         tracing::info!(
             format = format,
             file_count = file_count,
@@ -122,7 +125,7 @@ impl MetricsCollector {
     /// Record error metrics
     pub fn record_error(&mut self, error_type: &str, operation: &str) {
         self.errors_total += 1;
-        
+
         tracing::error!(
             error_type = error_type,
             operation = operation,

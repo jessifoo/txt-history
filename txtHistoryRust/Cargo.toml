@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Jessica Johnson"]
 description = "A Rust implementation of the txt-history message processor using imessage_database"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/txt-history-rust"
+readme = "README.md"
+keywords = ["imessage", "sms", "messages", "export", "nlp"]
+categories = ["command-line-utilities", "database"]
 
 [dependencies]
 anyhow = "1.0"  # Error handling
@@ -35,10 +40,69 @@ config = "0.14" # Configuration management
 serde_yaml = "0.9" # YAML configuration support
 metrics = "0.22" # Metrics collection
 
-# We're not using r2d2_sqlite directly, but implementing our own connection pooling
-# r2d2_sqlite = "0.23.0" # SQLite connection pooling
-rust-bert = { version = "0.21.0", optional = true }  # Keep an eye on rust-bert for new models and features, but it changes more slowly.
+# Optional advanced features
+rust-bert = { version = "0.21.0", optional = true }
+
+[dev-dependencies]
+criterion = "0.5"  # Benchmarking
+proptest = "1.0"   # Property-based testing
+mockall = "0.12"   # Mocking framework
+tempfile = "3.0"   # Temporary files for testing
 
 [features]
 default = []
-advanced-nlp = ["rust-bert"] # Optional feature for advanced NLP capabilities
+advanced-nlp = ["rust-bert"]
+
+[profile.release]
+lto = true           # Link-time optimization
+codegen-units = 1    # Better optimization
+opt-level = 3        # Maximum optimization
+strip = true         # Strip symbols for smaller binary
+
+[profile.dev]
+opt-level = 0        # Fast compilation
+debug = true         # Full debug info
+
+[profile.test]
+opt-level = 1        # Some optimization for faster tests
+
+# Linting configuration
+[lints.rust]
+unsafe_code = "forbid"              # No unsafe code
+missing_docs = "warn"               # Encourage documentation
+unused_must_use = "deny"            # Must handle Result types
+unreachable_pub = "warn"            # No unnecessary pub exports
+
+[lints.clippy]
+# Correctness (deny all - these are bugs)
+all = "deny"
+
+# Style & clarity
+pedantic = "warn"                   # Pedantic style warnings
+nursery = "warn"                    # Experimental lints
+
+# Specific allows (override pedantic where sensible)
+missing_errors_doc = "allow"        # Can be verbose
+missing_panics_doc = "allow"        # Can be verbose
+module_name_repetitions = "allow"   # Sometimes necessary
+similar_names = "allow"             # start/end are fine
+
+# Performance
+perf = "warn"
+
+# Complexity
+complexity = "warn"
+cognitive_complexity = "warn"
+
+# Cargo
+cargo = "warn"
+
+# Specific denies (treat as errors)
+unwrap_used = "warn"                # Prefer proper error handling
+expect_used = "warn"                # Prefer proper error handling
+panic = "warn"                      # Avoid panics in production code
+todo = "warn"                       # TODOs should be tracked
+unimplemented = "deny"              # Must be implemented
+dbg_macro = "warn"                  # Remove debug prints
+print_stdout = "warn"               # Use logging instead
+print_stderr = "warn"               # Use logging instead

@@ -3,9 +3,9 @@ use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
 // use serde::{Deserialize, Serialize}; // Unused for now
 use std::collections::HashSet;
-use stop_words::{LANGUAGE, get};
+use stop_words::{get, LANGUAGE};
 use unicode_normalization::UnicodeNormalization;
-use whatlang::{Lang, detect};
+use whatlang::{detect, Lang};
 
 use crate::db::Database;
 use crate::models::{DbProcessedMessage, NamedEntity, NlpAnalysis};
@@ -35,7 +35,10 @@ impl NlpProcessor {
             .map_err(|e| anyhow::anyhow!("Failed to compile spaces regex: {}", e))?;
 
         // Initialize stopwords for English
-        let stopwords: HashSet<String> = get(LANGUAGE::English).iter().map(|s| s.to_string()).collect();
+        let stopwords: HashSet<String> = get(LANGUAGE::English)
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
         // Initialize stemmer for English
         let stemmer = Stemmer::create(Algorithm::English);
@@ -93,10 +96,16 @@ impl NlpProcessor {
         let no_emojis = self.emoji_regex.replace_all(&no_urls, " ").to_string();
 
         // Replace special characters with space
-        let no_special = self.special_chars_regex.replace_all(&no_emojis, " ").to_string();
+        let no_special = self
+            .special_chars_regex
+            .replace_all(&no_emojis, " ")
+            .to_string();
 
         // Normalize whitespace
-        let normalized_spaces = self.extra_spaces_regex.replace_all(&no_special, " ").to_string();
+        let normalized_spaces = self
+            .extra_spaces_regex
+            .replace_all(&no_special, " ")
+            .to_string();
 
         // Trim and convert to lowercase
         normalized_spaces.trim().to_lowercase()
@@ -112,7 +121,11 @@ impl NlpProcessor {
 
     /// Lemmatize/stem the tokens
     fn lemmatize(&self, tokens: &[String]) -> String {
-        tokens.iter().map(|token| self.stemmer.stem(token)).collect::<Vec<_>>().join(" ")
+        tokens
+            .iter()
+            .map(|token| self.stemmer.stem(token))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Extract named entities from text (simplified implementation)
@@ -240,7 +253,9 @@ impl NlpProcessor {
         ];
 
         // Negation words that flip sentiment
-        let negations = ["not", "no", "never", "none", "nothing", "nobody", "nowhere", "neither", "nor"];
+        let negations = [
+            "not", "no", "never", "none", "nothing", "nobody", "nowhere", "neither", "nor",
+        ];
 
         let words: Vec<&str> = text.split_whitespace().collect();
         let mut total_sentiment = 0.0;
@@ -248,51 +263,55 @@ impl NlpProcessor {
 
         for (i, word) in words.iter().enumerate() {
             let lower_word = word.to_lowercase();
-            
+
             // Check for positive words
             if let Some((_, weight)) = positive_words.iter().find(|(w, _)| *w == lower_word) {
                 let mut sentiment = *weight;
-                
+
                 // Check for intensifiers before this word
                 if i > 0 {
                     let prev_word = words[i - 1].to_lowercase();
-                    if let Some((_, intensity)) = intensifiers.iter().find(|(w, _)| *w == prev_word) {
+                    if let Some((_, intensity)) = intensifiers.iter().find(|(w, _)| *w == prev_word)
+                    {
                         sentiment *= *intensity;
                     }
                 }
-                
+
                 // Check for negations before this word
-                let has_negation = (i >= 1 && negations.contains(&words[i - 1].to_lowercase().as_str())) ||
-                                 (i >= 2 && negations.contains(&words[i - 2].to_lowercase().as_str()));
-                
+                let has_negation = (i >= 1
+                    && negations.contains(&words[i - 1].to_lowercase().as_str()))
+                    || (i >= 2 && negations.contains(&words[i - 2].to_lowercase().as_str()));
+
                 if has_negation {
                     sentiment = -sentiment * 0.8; // Flip and reduce intensity
                 }
-                
+
                 total_sentiment += sentiment;
                 word_count += 1.0;
             }
-            
+
             // Check for negative words
             if let Some((_, weight)) = negative_words.iter().find(|(w, _)| *w == lower_word) {
                 let mut sentiment = *weight;
-                
+
                 // Check for intensifiers before this word
                 if i > 0 {
                     let prev_word = words[i - 1].to_lowercase();
-                    if let Some((_, intensity)) = intensifiers.iter().find(|(w, _)| *w == prev_word) {
+                    if let Some((_, intensity)) = intensifiers.iter().find(|(w, _)| *w == prev_word)
+                    {
                         sentiment *= *intensity;
                     }
                 }
-                
+
                 // Check for negations before this word
-                let has_negation = (i >= 1 && negations.contains(&words[i - 1].to_lowercase().as_str())) ||
-                                 (i >= 2 && negations.contains(&words[i - 2].to_lowercase().as_str()));
-                
+                let has_negation = (i >= 1
+                    && negations.contains(&words[i - 1].to_lowercase().as_str()))
+                    || (i >= 2 && negations.contains(&words[i - 2].to_lowercase().as_str()));
+
                 if has_negation {
                     sentiment = -sentiment * 0.8; // Flip and reduce intensity
                 }
-                
+
                 total_sentiment += sentiment;
                 word_count += 1.0;
             }
@@ -309,7 +328,11 @@ impl NlpProcessor {
     }
 
     /// Process a batch of messages and store results in the database
-    pub fn process_messages(&self, db: &Database, message_ids: &[i32]) -> Result<Vec<DbProcessedMessage>> {
+    pub fn process_messages(
+        &self,
+        db: &Database,
+        message_ids: &[i32],
+    ) -> Result<Vec<DbProcessedMessage>> {
         let mut processed_messages = Vec::new();
         let _conn = &mut db.get_connection()?;
 
@@ -317,7 +340,11 @@ impl NlpProcessor {
             // Check if message has already been processed with this version
             let existing = db.get_processed_message(message_id, &self.version)?;
             if existing.is_some() {
-                processed_messages.push(existing.ok_or_else(|| anyhow::anyhow!("Failed to get existing processed message"))?);
+                processed_messages.push(
+                    existing.ok_or_else(|| {
+                        anyhow::anyhow!("Failed to get existing processed message")
+                    })?,
+                );
                 continue;
             }
 
@@ -332,7 +359,11 @@ impl NlpProcessor {
             }
 
             // Process the message text
-            let analysis = self.process_text(&message.text.ok_or_else(|| anyhow::anyhow!("Message has no text content"))?)?;
+            let analysis = self.process_text(
+                &message
+                    .text
+                    .ok_or_else(|| anyhow::anyhow!("Message has no text content"))?,
+            )?;
 
             // Convert to database model
             let new_processed = analysis.to_new_processed_message(message_id, &self.version);

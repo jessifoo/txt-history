@@ -1,30 +1,48 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{info, error};
 use chrono::{Local, TimeZone};
 use csv::Writer;
 use imessage_database::tables::{
     chat::Chat,
     handle::Handle,
     messages::Message as ImessageMessage,
-    table::{Table, get_connection},
+    table::{get_connection, Table},
 };
 use serde_json;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use tracing::{error, info};
 
-use crate::{db::Database, models::{NewMessage, Message}};
 use crate::models::{Contact, DateRange, OutputFormat};
+use crate::{
+    db::Database,
+    models::{Message, NewMessage},
+};
 
 /// Repository trait for interacting with message data
 #[async_trait]
 pub trait MessageRepository {
-    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>>;
-    async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()>;
+    async fn fetch_messages(
+        &self,
+        contact: &Contact,
+        date_range: &DateRange,
+    ) -> Result<Vec<Message>>;
+    async fn save_messages(
+        &self,
+        messages: &[Message],
+        format: OutputFormat,
+        path: &Path,
+    ) -> Result<()>;
     async fn export_conversation_by_person(
-        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
-        lines_per_chunk: Option<usize>, only_contact: bool,
+        &self,
+        person_name: &str,
+        format: OutputFormat,
+        output_path: &Path,
+        date_range: &DateRange,
+        chunk_size: Option<f64>,
+        lines_per_chunk: Option<usize>,
+        only_contact: bool,
     ) -> Result<Vec<PathBuf>>;
 }
 
@@ -41,37 +59,53 @@ impl Repository {
 
     /// Export conversation with a specific person
     pub async fn export_conversation_by_person(
-        &self, person_name: &str, date_range: &DateRange, format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>,
-        output_path: &Path, only_contact: bool,
+        &self,
+        person_name: &str,
+        date_range: &DateRange,
+        format: OutputFormat,
+        size_mb: Option<f64>,
+        lines_per_chunk: Option<usize>,
+        output_path: &Path,
+        only_contact: bool,
     ) -> Result<Vec<PathBuf>> {
         // Get messages for the person
         let _start_date = date_range.start.map(|dt| dt.naive_local());
         let _end_date = date_range.end.map(|dt| dt.naive_local());
 
-        let mut db_messages = self.db.get_messages_by_contact_name(person_name, date_range)?;
+        let mut db_messages = self
+            .db
+            .get_messages_by_contact_name(person_name, date_range)?;
 
         if db_messages.is_empty() {
-            info!("No messages found for {} in the specified date range", person_name);
+            info!(
+                "No messages found for {} in the specified date range",
+                person_name
+            );
             return Ok(Vec::new());
         }
 
         // Filter to only show contact's messages if requested
         if only_contact {
             db_messages.retain(|msg| msg.sender == person_name);
-            info!("Filtered to {} messages from {} only", db_messages.len(), person_name);
+            info!(
+                "Filtered to {} messages from {} only",
+                db_messages.len(),
+                person_name
+            );
         }
 
         // db_messages are already in Message format
         let messages = db_messages;
 
         // Generate date range string for file naming
-        let date_range_str = if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
-            let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
-            let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
-            format!("{}_{}", start_date, end_date)
-        } else {
-            "no_messages".to_string()
-        };
+        let date_range_str =
+            if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
+                let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
+                let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
+                format!("{}_{}", start_date, end_date)
+            } else {
+                "no_messages".to_string()
+            };
 
         // Chunk messages based on size or line count
         let chunks = if let Some(size) = size_mb {
@@ -86,7 +120,7 @@ impl Repository {
 
         for (i, chunk) in chunks.iter().enumerate() {
             let chunk_num = i + 1;
-            
+
             // Generate file names with contact name and date range
             let base_name = if chunks.len() == 1 {
                 format!("{}_{}", person_name, date_range_str)
@@ -107,13 +141,24 @@ impl Repository {
     }
 
     /// Save messages to a file in the specified format
-    async fn save_messages(&self, messages: &[Message], format: OutputFormat, file_path: &Path) -> Result<()> {
+    async fn save_messages(
+        &self,
+        messages: &[Message],
+        format: OutputFormat,
+        file_path: &Path,
+    ) -> Result<()> {
         match format {
-            OutputFormat::Txt => self.save_txt(messages, file_path).await
+            OutputFormat::Txt => self
+                .save_txt(messages, file_path)
+                .await
                 .with_context(|| format!("Failed to save TXT file: {:?}", file_path))?,
-            OutputFormat::Csv => self.save_csv(messages, file_path).await
+            OutputFormat::Csv => self
+                .save_csv(messages, file_path)
+                .await
                 .with_context(|| format!("Failed to save CSV file: {:?}", file_path))?,
-            OutputFormat::Json => self.save_json(messages, file_path).await
+            OutputFormat::Json => self
+                .save_json(messages, file_path)
+                .await
                 .with_context(|| format!("Failed to save JSON file: {:?}", file_path))?,
         }
 
@@ -173,7 +218,7 @@ impl Repository {
         use serde::ser::SerializeSeq;
         let mut ser = serde_json::Serializer::new(writer);
         let mut seq = ser.serialize_seq(Some(messages.len()))?;
-        
+
         for message in messages {
             seq.serialize_element(&serde_json::json!({
                 "sender": message.sender,
@@ -238,16 +283,27 @@ impl Repository {
 
 #[async_trait::async_trait]
 impl MessageRepository for Repository {
-    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>> {
+    async fn fetch_messages(
+        &self,
+        contact: &Contact,
+        date_range: &DateRange,
+    ) -> Result<Vec<Message>> {
         // Get messages from our database for this contact
-        let db_messages = self.db.get_messages_by_contact_name(&contact.name, date_range)
+        let db_messages = self
+            .db
+            .get_messages_by_contact_name(&contact.name, date_range)
             .with_context(|| format!("Failed to fetch messages for contact: {}", contact.name))?;
-        
+
         // db_messages is already Vec<Message>, no conversion needed
         Ok(db_messages)
     }
 
-    async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
+    async fn save_messages(
+        &self,
+        messages: &[Message],
+        format: OutputFormat,
+        path: &Path,
+    ) -> Result<()> {
         use std::fs::File;
         use std::io::{BufWriter, Write};
 
@@ -269,7 +325,7 @@ impl MessageRepository for Repository {
             OutputFormat::Csv => {
                 let mut csv_writer = Writer::from_writer(writer);
                 csv_writer.write_record(&["Sender", "Timestamp", "Content"])?;
-                
+
                 for message in messages {
                     csv_writer.write_record(&[
                         &message.sender,
@@ -284,7 +340,7 @@ impl MessageRepository for Repository {
                 use serde::ser::SerializeSeq;
                 let mut ser = serde_json::Serializer::new(writer);
                 let mut seq = ser.serialize_seq(Some(messages.len()))?;
-                
+
                 for message in messages {
                     seq.serialize_element(&serde_json::json!({
                         "sender": message.sender,
@@ -300,11 +356,11 @@ impl MessageRepository for Repository {
     }
 
     async fn export_conversation_by_person(
-        &self, 
-        person_name: &str, 
-        format: OutputFormat, 
-        output_path: &Path, 
-        date_range: &DateRange, 
+        &self,
+        person_name: &str,
+        format: OutputFormat,
+        output_path: &Path,
+        date_range: &DateRange,
         chunk_size: Option<f64>,
         lines_per_chunk: Option<usize>,
         only_contact: bool,
@@ -313,14 +369,15 @@ impl MessageRepository for Repository {
         let start_date = date_range.start.map(|dt| dt.naive_local());
         let end_date = date_range.end.map(|dt| dt.naive_local());
 
-        let db_messages = self.db.get_conversation_with_person(
-            person_name,
-            start_date,
-            end_date,
-        )?;
+        let db_messages =
+            self.db
+                .get_conversation_with_person(person_name, start_date, end_date)?;
 
         if db_messages.is_empty() {
-            info!("No messages found for {} in the specified date range", person_name);
+            info!(
+                "No messages found for {} in the specified date range",
+                person_name
+            );
             return Ok(Vec::new());
         }
 
@@ -330,7 +387,8 @@ impl MessageRepository for Repository {
             .map(|db_msg| Message {
                 content: db_msg.text.unwrap_or_default(),
                 sender: db_msg.sender,
-                timestamp: chrono::Utc.from_utc_datetime(&db_msg.date_created)
+                timestamp: chrono::Utc
+                    .from_utc_datetime(&db_msg.date_created)
                     .with_timezone(&Local),
             })
             .collect();
@@ -338,34 +396,39 @@ impl MessageRepository for Repository {
         // Filter to only show contact's messages if requested
         if only_contact {
             messages.retain(|msg| msg.sender == person_name);
-            info!("Filtered to {} messages from {} only", messages.len(), person_name);
+            info!(
+                "Filtered to {} messages from {} only",
+                messages.len(),
+                person_name
+            );
         }
-// Chunk messages based on size or line count
-// Default to 0.1 MB if no chunk size is specified
-let default_chunk_size_mb = 0.1;
-let chunks = if let Some(size_mb) = chunk_size {
-    self.chunk_by_size(&messages, size_mb)
-} else if let Some(lines) = lines_per_chunk {
-    self.chunk_by_lines(&messages, lines)
-} else {
-    // Default chunking by size (0.1 MB)
-    self.chunk_by_size(&messages, default_chunk_size_mb)
-};
+        // Chunk messages based on size or line count
+        // Default to 0.1 MB if no chunk size is specified
+        let default_chunk_size_mb = 0.1;
+        let chunks = if let Some(size_mb) = chunk_size {
+            self.chunk_by_size(&messages, size_mb)
+        } else if let Some(lines) = lines_per_chunk {
+            self.chunk_by_lines(&messages, lines)
+        } else {
+            // Default chunking by size (0.1 MB)
+            self.chunk_by_size(&messages, default_chunk_size_mb)
+        };
 
         let mut output_files = Vec::new();
 
         // Generate date range string for file naming
-        let date_range_str = if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
-            let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
-            let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
-            format!("{}_{}", start_date, end_date)
-        } else {
-            "no_messages".to_string()
-        };
+        let date_range_str =
+            if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
+                let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
+                let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
+                format!("{}_{}", start_date, end_date)
+            } else {
+                "no_messages".to_string()
+            };
 
         for (i, chunk) in chunks.iter().enumerate() {
             let chunk_num = i + 1;
-            
+
             // Generate file names with contact name and date range
             let base_name = if chunks.len() == 1 {
                 format!("{}_{}", person_name, date_range_str)
@@ -377,12 +440,14 @@ let chunks = if let Some(size_mb) = chunk_size {
 
             // Save CSV file
             let csv_path = base_path.with_extension("csv");
-            self.save_messages(chunk, OutputFormat::Csv, &csv_path).await?;
+            self.save_messages(chunk, OutputFormat::Csv, &csv_path)
+                .await?;
             output_files.push(csv_path);
 
             // Save TXT file
             let txt_path = base_path.with_extension("txt");
-            self.save_messages(chunk, OutputFormat::Txt, &txt_path).await?;
+            self.save_messages(chunk, OutputFormat::Txt, &txt_path)
+                .await?;
             output_files.push(txt_path);
         }
 
@@ -400,7 +465,10 @@ impl IMessageDatabaseRepo {
     pub fn new(chat_db_path: PathBuf) -> Result<Self> {
         // Validate that the path exists
         if !chat_db_path.exists() {
-            return Err(anyhow::anyhow!("iMessage database path does not exist: {:?}", chat_db_path));
+            return Err(anyhow::anyhow!(
+                "iMessage database path does not exist: {:?}",
+                chat_db_path
+            ));
         }
 
         // Initialize our database using environment variable or platform-appropriate default
@@ -415,12 +483,13 @@ impl IMessageDatabaseRepo {
     // Helper method to find a handle by phone or email using indexed query
     async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
         // Create a connection to the iMessage database
-        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+        let db = get_connection(&self.db_path)
+            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
         // Use direct SQL query with index instead of full table scan
         // The handle table has an id column which contains phone/email
         use rusqlite::OptionalExtension;
-        
+
         // Try to find by phone first
         if let Some(phone) = &contact.phone {
             let query = "SELECT ROWID, id, country, service, uncanonicalized_id FROM handle WHERE id = ? LIMIT 1";
@@ -470,14 +539,15 @@ impl IMessageDatabaseRepo {
     // Helper method to find a chat by handle using indexed query
     async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
         // Create a connection to the iMessage database
-        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+        let db = get_connection(&self.db_path)
+            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
         // Use direct SQL query with index instead of full table scan
         use rusqlite::OptionalExtension;
-        
+
         let query = "SELECT ROWID, chat_identifier, service_name, display_name, participants, is_filtered, \
                             is_recovered, is_blackholed FROM chat WHERE chat_identifier = ? LIMIT 1";
-        
+
         let chat: Option<Chat> = db
             .query_row(query, [&handle.id], |row| {
                 Ok(Chat {
@@ -500,22 +570,26 @@ impl IMessageDatabaseRepo {
     // Save messages to database
     async fn save_to_database(&self, messages: &[Message], contact: &Contact) -> Result<()> {
         // Ensure contact exists in database
-        let db_contact = self.database.add_or_update_contact(crate::models::NewContact {
-            name: contact.name.clone(),
-            phone: contact.phone.clone(),
-            email: contact.email.clone(),
-            is_me: false,
-            primary_identifier: None, // Will be auto-set based on phone/email
-        })?;
+        let db_contact = self
+            .database
+            .add_or_update_contact(crate::models::NewContact {
+                name: contact.name.clone(),
+                phone: contact.phone.clone(),
+                email: contact.email.clone(),
+                is_me: false,
+                primary_identifier: None, // Will be auto-set based on phone/email
+            })?;
 
         // Ensure "me" contact exists
-        let me_contact = self.database.add_or_update_contact(crate::models::NewContact {
-            name: "Jess".to_string(),
-            phone: None,
-            email: None,
-            is_me: true,
-            primary_identifier: Some("Jess".to_string()),
-        })?;
+        let me_contact = self
+            .database
+            .add_or_update_contact(crate::models::NewContact {
+                name: "Jess".to_string(),
+                phone: None,
+                email: None,
+                is_me: true,
+                primary_identifier: Some("Jess".to_string()),
+            })?;
 
         // Save messages
         for message in messages {
@@ -546,7 +620,11 @@ impl IMessageDatabaseRepo {
 
 #[async_trait]
 impl MessageRepository for IMessageDatabaseRepo {
-    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>> {
+    async fn fetch_messages(
+        &self,
+        contact: &Contact,
+        date_range: &DateRange,
+    ) -> Result<Vec<Message>> {
         // Find the handle for this contact
         let handle = match self.find_handle(contact).await? {
             Some(h) => h,
@@ -566,7 +644,8 @@ impl MessageRepository for IMessageDatabaseRepo {
         };
 
         // Create a connection to the iMessage database
-        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+        let db = get_connection(&self.db_path)
+            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
         // Get the time offset for date conversion
         let offset = imessage_database::util::dates::get_offset();
@@ -580,39 +659,43 @@ impl MessageRepository for IMessageDatabaseRepo {
                                 thread_originator_part, chat_id, num_attachments, deleted_from, \
                                 num_replies \
                          FROM message WHERE chat_id = ?".to_string();
-        
+
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(chat.rowid)];
-        
+
         // Add date range filters to the SQL query for better performance
         if date_range.start.is_some() {
             query.push_str(" AND date >= ?");
             // Convert DateTime to Apple's epoch (nanoseconds since 2001-01-01)
-            let apple_epoch = date_range.start.unwrap().timestamp_nanos_opt().unwrap_or(0) / 1_000_000_000 
+            let apple_epoch = date_range.start.unwrap().timestamp_nanos_opt().unwrap_or(0)
+                / 1_000_000_000
                 - 978307200; // Offset from 2001-01-01 to 1970-01-01
             params.push(Box::new(apple_epoch));
         }
-        
+
         if date_range.end.is_some() {
             query.push_str(" AND date <= ?");
-            let apple_epoch = date_range.end.unwrap().timestamp_nanos_opt().unwrap_or(0) / 1_000_000_000 
+            let apple_epoch = date_range.end.unwrap().timestamp_nanos_opt().unwrap_or(0)
+                / 1_000_000_000
                 - 978307200;
             params.push(Box::new(apple_epoch));
         }
-        
+
         query.push_str(" ORDER BY date ASC");
 
-        let mut stmt = db.prepare(&query)
+        let mut stmt = db
+            .prepare(&query)
             .map_err(|e| anyhow::anyhow!("Failed to prepare query: {}", e))?;
-        
-        let message_iter = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-            // Parse row into ImessageMessage manually for performance
-            let is_from_me: bool = row.get(9)?;
-            let date: i64 = row.get(6)?;
-            let text: Option<String> = row.get(2)?;
-            
-            Ok((is_from_me, date, text))
-        })
-        .map_err(|e| anyhow::anyhow!("Failed to execute query: {}", e))?;
+
+        let message_iter = stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                // Parse row into ImessageMessage manually for performance
+                let is_from_me: bool = row.get(9)?;
+                let date: i64 = row.get(6)?;
+                let text: Option<String> = row.get(2)?;
+
+                Ok((is_from_me, date, text))
+            })
+            .map_err(|e| anyhow::anyhow!("Failed to execute query: {}", e))?;
 
         let mut messages = Vec::new();
         for result in message_iter {
@@ -627,7 +710,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                             continue;
                         }
                     };
-                    
+
                     if let Some(text) = text_opt {
                         let message = Message {
                             sender: if is_from_me {
@@ -650,7 +733,12 @@ impl MessageRepository for IMessageDatabaseRepo {
         Ok(messages)
     }
 
-    async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
+    async fn save_messages(
+        &self,
+        messages: &[Message],
+        format: OutputFormat,
+        path: &Path,
+    ) -> Result<()> {
         match format {
             OutputFormat::Txt => {
                 let file = File::create(path)?;
@@ -668,7 +756,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                 }
 
                 Ok(())
-            },
+            }
             OutputFormat::Csv => {
                 let file = File::create(path)?;
                 let mut writer = Writer::from_writer(file);
@@ -676,14 +764,17 @@ impl MessageRepository for IMessageDatabaseRepo {
                 for message in messages {
                     writer.write_record(&[
                         &message.sender,
-                        &message.timestamp.format("%b %d, %Y %l:%M:%S %p").to_string(),
+                        &message
+                            .timestamp
+                            .format("%b %d, %Y %l:%M:%S %p")
+                            .to_string(),
                         &message.content,
                     ])?;
                 }
 
                 writer.flush()?;
                 Ok(())
-            },
+            }
             OutputFormat::Json => {
                 let file = File::create(path)?;
                 let writer = BufWriter::new(file);
@@ -692,7 +783,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                 use serde::ser::SerializeSeq;
                 let mut ser = serde_json::Serializer::pretty(writer);
                 let mut seq = ser.serialize_seq(Some(messages.len()))?;
-                
+
                 for msg in messages {
                     seq.serialize_element(&serde_json::json!({
                         "sender": msg.sender,
@@ -702,13 +793,19 @@ impl MessageRepository for IMessageDatabaseRepo {
                 }
                 seq.end()?;
                 Ok(())
-            },
+            }
         }
     }
 
     async fn export_conversation_by_person(
-        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
-        lines_per_chunk: Option<usize>, only_contact: bool,
+        &self,
+        person_name: &str,
+        format: OutputFormat,
+        output_path: &Path,
+        date_range: &DateRange,
+        chunk_size: Option<f64>,
+        lines_per_chunk: Option<usize>,
+        only_contact: bool,
     ) -> Result<Vec<PathBuf>> {
         // Get contact by name
         let contact = match self.database.get_contact(person_name)? {
@@ -727,26 +824,34 @@ impl MessageRepository for IMessageDatabaseRepo {
         // Filter to only show contact's messages if requested
         if only_contact {
             messages.retain(|msg| msg.sender == person_name);
-            info!("Filtered to {} messages from {} only", messages.len(), person_name);
+            info!(
+                "Filtered to {} messages from {} only",
+                messages.len(),
+                person_name
+            );
         }
 
         // If no messages, return early
         if messages.is_empty() {
-            return Err(anyhow::anyhow!("No messages found for contact: {}", person_name));
+            return Err(anyhow::anyhow!(
+                "No messages found for contact: {}",
+                person_name
+            ));
         }
 
         // Generate date range string for file naming
-        let date_range_str = if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
-            let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
-            let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
-            format!("{}_{}", start_date, end_date)
-        } else {
-            "no_messages".to_string()
-        };
+        let date_range_str =
+            if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
+                let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
+                let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
+                format!("{}_{}", start_date, end_date)
+            } else {
+                "no_messages".to_string()
+            };
 
         // Create output files
         let mut output_files = Vec::new();
-        
+
         // Determine chunking strategy and save each chunk
         if let Some(lines) = lines_per_chunk {
             // Chunk by line count
@@ -758,7 +863,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                     format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_num)
                 };
                 let base_path = output_path.join(base_name);
-                
+
                 self.save_messages(chunk, format, &base_path).await?;
                 output_files.push(base_path);
             }
@@ -772,14 +877,18 @@ impl MessageRepository for IMessageDatabaseRepo {
                 // Estimate message size (very rough approximation)
                 let message_size = message.sender.len() + message.content.len() + 50; // 50 for timestamp and formatting
 
-                if current_size + message_size > (size * 1024.0 * 1024.0) as usize && !current_chunk.is_empty() {
+                if current_size + message_size > (size * 1024.0 * 1024.0) as usize
+                    && !current_chunk.is_empty()
+                {
                     // Save the current chunk
-                    let base_name = format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_index);
+                    let base_name =
+                        format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_index);
                     let base_path = output_path.join(base_name);
-                    
-                    self.save_messages(&current_chunk, format, &base_path).await?;
+
+                    self.save_messages(&current_chunk, format, &base_path)
+                        .await?;
                     output_files.push(base_path);
-                    
+
                     // Start a new chunk
                     current_chunk = Vec::new();
                     current_size = 0;
@@ -798,15 +907,16 @@ impl MessageRepository for IMessageDatabaseRepo {
                     format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_index)
                 };
                 let base_path = output_path.join(base_name);
-                
-                self.save_messages(&current_chunk, format, &base_path).await?;
+
+                self.save_messages(&current_chunk, format, &base_path)
+                    .await?;
                 output_files.push(base_path);
             }
         } else {
             // No chunking, just one file with all messages
             let base_name = format!("{}_{}", person_name, date_range_str);
             let base_path = output_path.join(base_name);
-            
+
             self.save_messages(&messages, format, &base_path).await?;
             output_files.push(base_path);
         }

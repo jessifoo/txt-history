@@ -15,11 +15,11 @@ use crate::db::Database;
 use crate::models::{Contact, DateRange, OutputFormat};
 use crate::nlp::NlpProcessor;
 use crate::repository::MessageRepository;
-use txt_history_rust::validation::InputValidator;
+use tracing::{debug, error, info, warn};
 use txt_history_rust::config::AppConfig;
 use txt_history_rust::logging::{init_logging, OperationTimer};
 use txt_history_rust::metrics::MetricsCollector;
-use tracing::{info, warn, error, debug};
+use txt_history_rust::validation::InputValidator;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -148,12 +148,12 @@ enum Commands {
 async fn main() -> Result<()> {
     // Load configuration
     let config = AppConfig::load()?;
-    
+
     // Initialize logging
     init_logging(Some(&config.get_log_level()), None)?;
-    
+
     info!("Starting txt-history-rust application");
-    
+
     // Parse command line arguments
     let cli = Cli::parse();
 
@@ -170,7 +170,12 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => import_messages(&config, name, start_date, end_date, format, *size, *lines, output_dir).await?,
+        } => {
+            import_messages(
+                &config, name, start_date, end_date, format, *size, *lines, output_dir,
+            )
+            .await?
+        }
         Commands::Query {
             name,
             start_date,
@@ -179,7 +184,9 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => query_messages(&config, &db, name, start_date, end_date, format, *size, *lines, output_dir)?,
+        } => query_messages(
+            &config, &db, name, start_date, end_date, format, *size, *lines, output_dir,
+        )?,
         Commands::ExportByPerson {
             name,
             start_date,
@@ -187,7 +194,12 @@ async fn main() -> Result<()> {
             size,
             lines,
             output_dir,
-        } => export_conversation_by_person(&config, &db, name, start_date, end_date, *size, *lines, output_dir).await?,
+        } => {
+            export_conversation_by_person(
+                &config, &db, name, start_date, end_date, *size, *lines, output_dir,
+            )
+            .await?
+        }
         Commands::Process {
             version,
             name,
@@ -195,7 +207,16 @@ async fn main() -> Result<()> {
             end_date,
             batch_size,
             stats,
-        } => process_messages(&config, &db, version, name, start_date, end_date, *batch_size, *stats)?,
+        } => process_messages(
+            &config,
+            &db,
+            version,
+            name,
+            start_date,
+            end_date,
+            *batch_size,
+            *stats,
+        )?,
     }
 
     Ok(())
@@ -203,7 +224,13 @@ async fn main() -> Result<()> {
 
 /// Import messages from iMessage database
 async fn import_messages(
-    config: &AppConfig, name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>, lines: Option<usize>,
+    config: &AppConfig,
+    name: &str,
+    start_date: &Option<String>,
+    end_date: &Option<String>,
+    format: &str,
+    size: Option<f64>,
+    lines: Option<usize>,
     output_dir: &str,
 ) -> Result<()> {
     // Get iMessage database path from configuration or use dynamic detection
@@ -251,18 +278,24 @@ async fn import_messages(
         _ => {
             warn!("Invalid format: {}. Using txt as default.", format);
             OutputFormat::Txt
-        },
+        }
     };
 
     // Use configuration output directory if not provided
-    let effective_output_dir = if output_dir.is_empty() { &config.export.output_directory } else { output_dir };
-    
+    let effective_output_dir = if output_dir.is_empty() {
+        &config.export.output_directory
+    } else {
+        output_dir
+    };
+
     // Create output directory if it doesn't exist
     std::fs::create_dir_all(effective_output_dir)?;
 
     // Fetch messages
     info!("Fetching messages for contact: {}", contact.name);
-    let messages = repo.fetch_messages(&contact, &date_range).await
+    let messages = repo
+        .fetch_messages(&contact, &date_range)
+        .await
         .with_context(|| format!("Failed to fetch messages for contact: {}", contact.name))?;
     info!("Found {} messages", messages.len());
 
@@ -275,8 +308,15 @@ async fn import_messages(
 
 /// Query messages from the database
 fn query_messages(
-    config: &AppConfig, db: &Database, name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>,
-    lines: Option<usize>, output_dir: &str,
+    config: &AppConfig,
+    db: &Database,
+    name: &str,
+    start_date: &Option<String>,
+    end_date: &Option<String>,
+    format: &str,
+    size: Option<f64>,
+    lines: Option<usize>,
+    output_dir: &str,
 ) -> Result<()> {
     // Get contact info
     let contact = get_contact_info(name)?;
@@ -299,18 +339,23 @@ fn query_messages(
         _ => {
             warn!("Invalid format: {}. Using txt as default.", format);
             OutputFormat::Txt
-        },
+        }
     };
 
     // Use configuration output directory if not provided
-    let effective_output_dir = if output_dir.is_empty() { &config.export.output_directory } else { output_dir };
-    
+    let effective_output_dir = if output_dir.is_empty() {
+        &config.export.output_directory
+    } else {
+        output_dir
+    };
+
     // Create output directory if it doesn't exist
     std::fs::create_dir_all(effective_output_dir)?;
 
     // Query messages
     info!("Querying messages...");
-    let messages = db.get_messages_by_contact_name(&contact.name, &date_range)
+    let messages = db
+        .get_messages_by_contact_name(&contact.name, &date_range)
         .with_context(|| format!("Failed to query messages for contact: {}", contact.name))?;
     info!("Found {} messages", messages.len());
 
@@ -322,15 +367,25 @@ fn query_messages(
 
 /// Export conversation with a specific person
 async fn export_conversation_by_person(
-    config: &AppConfig, db: &Database, name: &str, start_date: &Option<String>, end_date: &Option<String>, size_mb: Option<f64>,
-    lines_per_chunk: Option<usize>, output_dir: &str,
+    config: &AppConfig,
+    db: &Database,
+    name: &str,
+    start_date: &Option<String>,
+    end_date: &Option<String>,
+    size_mb: Option<f64>,
+    lines_per_chunk: Option<usize>,
+    output_dir: &str,
 ) -> Result<()> {
     // Parse date range
     let date_range = parse_date_range(start_date, end_date)?;
 
     // Use configuration output directory if not provided
-    let effective_output_dir = if output_dir.is_empty() { &config.export.output_directory } else { output_dir };
-    
+    let effective_output_dir = if output_dir.is_empty() {
+        &config.export.output_directory
+    } else {
+        output_dir
+    };
+
     // Create output directory if it doesn't exist
     std::fs::create_dir_all(effective_output_dir)?;
 
@@ -345,12 +400,28 @@ async fn export_conversation_by_person(
 
     // Export in both TXT and CSV formats
     let txt_files = repo
-        .export_conversation_by_person(name, &date_range, OutputFormat::Txt, size_mb, lines_per_chunk, output_path, false)
+        .export_conversation_by_person(
+            name,
+            &date_range,
+            OutputFormat::Txt,
+            size_mb,
+            lines_per_chunk,
+            output_path,
+            false,
+        )
         .await?;
     info!("Exported {} TXT files", txt_files.len());
 
     let csv_files = repo
-        .export_conversation_by_person(name, &date_range, OutputFormat::Csv, size_mb, lines_per_chunk, output_path, false)
+        .export_conversation_by_person(
+            name,
+            &date_range,
+            OutputFormat::Csv,
+            size_mb,
+            lines_per_chunk,
+            output_path,
+            false,
+        )
         .await?;
     info!("Exported {} CSV files", csv_files.len());
 
@@ -359,13 +430,19 @@ async fn export_conversation_by_person(
 
 /// Process messages with NLP
 fn process_messages(
-    config: &AppConfig, db: &Database, version: &str, name: &Option<String>, start_date: &Option<String>, end_date: &Option<String>, batch_size: usize,
+    config: &AppConfig,
+    db: &Database,
+    version: &str,
+    name: &Option<String>,
+    start_date: &Option<String>,
+    end_date: &Option<String>,
+    batch_size: usize,
     show_stats: bool,
 ) -> Result<()> {
     // Create NLP processor
     // Validate processing version
     InputValidator::validate_processing_version(version)?;
-    
+
     let processor = NlpProcessor::new(version)?;
     info!("Using NLP processor version: {}", version);
 
@@ -400,9 +477,13 @@ fn process_messages(
     // Process messages in batches
     let total_messages = message_ids.len();
     let mut processed_count = 0;
-    
+
     // Use configuration batch size if not provided
-    let effective_batch_size = if batch_size > 0 { batch_size } else { config.nlp.batch_size };
+    let effective_batch_size = if batch_size > 0 {
+        batch_size
+    } else {
+        config.nlp.batch_size
+    };
 
     for chunk in message_ids.chunks(effective_batch_size) {
         let batch_ids = chunk.to_vec();
@@ -472,7 +553,7 @@ fn get_contact_info(name: &str) -> Result<Contact> {
                 "Contact not found: {}. Available contacts: Jess, Phil, Robert, Rhonda, Sherry",
                 name
             ));
-        },
+        }
     };
 
     Ok(contact)
@@ -482,9 +563,12 @@ fn get_contact_info(name: &str) -> Result<Contact> {
 fn parse_date_range(start_date: &Option<String>, end_date: &Option<String>) -> Result<DateRange> {
     let start = if let Some(date_str) = start_date {
         Some(
-            DateTime::parse_from_str(&format!("{} 00:00:00 +0000", date_str), "%Y-%m-%d %H:%M:%S %z")
-                .context("Invalid start date format, use YYYY-MM-DD")?
-                .with_timezone(&Local),
+            DateTime::parse_from_str(
+                &format!("{} 00:00:00 +0000", date_str),
+                "%Y-%m-%d %H:%M:%S %z",
+            )
+            .context("Invalid start date format, use YYYY-MM-DD")?
+            .with_timezone(&Local),
         )
     } else {
         None
@@ -492,24 +576,30 @@ fn parse_date_range(start_date: &Option<String>, end_date: &Option<String>) -> R
 
     let end = if let Some(date_str) = end_date {
         Some(
-            DateTime::parse_from_str(&format!("{} 23:59:59 +0000", date_str), "%Y-%m-%d %H:%M:%S %z")
-                .context("Invalid end date format, use YYYY-MM-DD")?
-                .with_timezone(&Local),
+            DateTime::parse_from_str(
+                &format!("{} 23:59:59 +0000", date_str),
+                "%Y-%m-%d %H:%M:%S %z",
+            )
+            .context("Invalid end date format, use YYYY-MM-DD")?
+            .with_timezone(&Local),
         )
     } else {
         None
     };
 
     // Validate the date range
-    InputValidator::validate_date_range(start, end)
-        .context("Date range validation failed")?;
+    InputValidator::validate_date_range(start, end).context("Date range validation failed")?;
 
     Ok(DateRange { start, end })
 }
 
 /// Write messages to files with chunking
 fn write_messages_to_files(
-    messages: &[models::Message], format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>, output_dir: &str,
+    messages: &[models::Message],
+    format: OutputFormat,
+    size_mb: Option<f64>,
+    lines_per_chunk: Option<usize>,
+    output_dir: &str,
 ) -> Result<()> {
     if messages.is_empty() {
         warn!("No messages to write");
@@ -518,13 +608,11 @@ fn write_messages_to_files(
 
     // Validate chunk parameters
     if let Some(size) = size_mb {
-        InputValidator::validate_chunk_size(size)
-            .context("Invalid chunk size")?;
+        InputValidator::validate_chunk_size(size).context("Invalid chunk size")?;
     }
-    
+
     if let Some(lines) = lines_per_chunk {
-        InputValidator::validate_lines_per_chunk(lines)
-            .context("Invalid lines per chunk")?;
+        InputValidator::validate_lines_per_chunk(lines).context("Invalid lines per chunk")?;
     }
 
     // Determine chunking strategy
@@ -560,17 +648,17 @@ fn write_messages_to_files(
                 let file_path = format!("{}.txt", file_base);
                 write_txt_file(chunk, &file_path)?;
                 debug!("Wrote {} messages to {}", chunk.len(), file_path);
-            },
+            }
             OutputFormat::Csv => {
                 let file_path = format!("{}.csv", file_base);
                 write_csv_file(chunk, &file_path)?;
                 debug!("Wrote {} messages to {}", chunk.len(), file_path);
-            },
+            }
             OutputFormat::Json => {
                 let file_path = format!("{}.json", file_base);
                 write_json_file(chunk, &file_path)?;
                 debug!("Wrote {} messages to {}", chunk.len(), file_path);
-            },
+            }
         }
     }
 
@@ -636,7 +724,7 @@ fn write_json_file(messages: &[models::Message], file_path: &str) -> Result<()> 
     use serde::ser::SerializeSeq;
     let mut ser = serde_json::Serializer::new(writer);
     let mut seq = ser.serialize_seq(Some(messages.len()))?;
-    
+
     for message in messages {
         seq.serialize_element(&serde_json::json!({
             "sender": message.sender,

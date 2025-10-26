@@ -1,6 +1,6 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use config::{Config, Environment, File};
+use serde::{Deserialize, Serialize};
 
 /// Application configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +127,9 @@ impl AppConfig {
             return Err(anyhow::anyhow!("max_connections must be greater than 0"));
         }
         if self.database.connection_timeout_secs == 0 {
-            return Err(anyhow::anyhow!("connection_timeout_secs must be greater than 0"));
+            return Err(anyhow::anyhow!(
+                "connection_timeout_secs must be greater than 0"
+            ));
         }
 
         // Validate logging config
@@ -172,7 +174,9 @@ impl AppConfig {
         }
 
         if self.export.max_lines_per_chunk == 0 {
-            return Err(anyhow::anyhow!("max_lines_per_chunk must be greater than 0"));
+            return Err(anyhow::anyhow!(
+                "max_lines_per_chunk must be greater than 0"
+            ));
         }
 
         // Validate iMessage config
@@ -185,43 +189,39 @@ impl AppConfig {
 
     /// Get database URL from environment or config
     pub fn get_database_url(&self) -> String {
-        std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| self.database.url.clone())
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| self.database.url.clone())
     }
 
     /// Get iMessage database path from environment or config
     pub fn get_imessage_db_path(&self) -> String {
-        std::env::var("IMESSAGE_DB_PATH")
-            .unwrap_or_else(|_| {
-                if self.imessage.database_path.is_empty() {
-                    // Use platform-agnostic approach - only default to macOS path on macOS
-                    #[cfg(target_os = "macos")]
-                    {
-                        if let Ok(home) = std::env::var("HOME") {
-                            format!("{}/Library/Messages/chat.db", home)
-                        } else {
-                            // No default on macOS without HOME
-                            String::new()
-                        }
-                    }
-                    #[cfg(not(target_os = "macos"))]
-                    {
-                        // No default iMessage path on non-macOS systems
+        std::env::var("IMESSAGE_DB_PATH").unwrap_or_else(|_| {
+            if self.imessage.database_path.is_empty() {
+                // Use platform-agnostic approach - only default to macOS path on macOS
+                #[cfg(target_os = "macos")]
+                {
+                    if let Ok(home) = std::env::var("HOME") {
+                        format!("{}/Library/Messages/chat.db", home)
+                    } else {
+                        // No default on macOS without HOME
                         String::new()
                     }
-                } else {
-                    self.imessage.database_path.clone()
                 }
-            })
+                #[cfg(not(target_os = "macos"))]
+                {
+                    // No default iMessage path on non-macOS systems
+                    String::new()
+                }
+            } else {
+                self.imessage.database_path.clone()
+            }
+        })
     }
 
     /// Get log level from environment or config
     pub fn get_log_level(&self) -> String {
-        std::env::var("RUST_LOG")
-            .unwrap_or_else(|_| self.logging.level.clone())
+        std::env::var("RUST_LOG").unwrap_or_else(|_| self.logging.level.clone())
     }
 }
-
 
 #[cfg(test)]
 mod tests {

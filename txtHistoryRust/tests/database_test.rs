@@ -12,9 +12,11 @@ fn test_database_creation_and_initialization() {
 
     // Test database creation
     let db = Database::new(&db_url).expect("Failed to create database");
-    
+
     // Test that we can get a connection
-    let _conn = db.get_connection().expect("Failed to get database connection");
+    let _conn = db
+        .get_connection()
+        .expect("Failed to get database connection");
 }
 
 #[test]
@@ -35,7 +37,9 @@ fn test_contact_management() {
         primary_identifier: Some("test_user".to_string()),
     };
 
-    let contact = db.add_or_update_contact(new_contact).expect("Failed to add contact");
+    let contact = db
+        .add_or_update_contact(new_contact)
+        .expect("Failed to add contact");
     assert_eq!(contact.name, "Test User");
     assert_eq!(contact.phone, Some("+1234567890".to_string()));
 

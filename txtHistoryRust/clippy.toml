@@ -1,17 +1,22 @@
-# Clippy configuration - thresholds and options
+# Clippy Configuration - Google Interview Level Quality
+# Enforces best practices, performance, and code correctness
 
-allow-unused-imports = true
+# === Complexity Thresholds (Strict) ===
+cognitive-complexity-threshold = 12    # Lower than default (15) - forces simpler functions
+type-complexity-threshold = 150        # Stricter than default (250)
+too-many-arguments-threshold = 4       # Stricter than default (7) - encourages structs
+too-many-lines-threshold = 80          # Strict limit - forces function decomposition
 
-# Complexity thresholds
-cognitive-complexity-threshold = 15
-type-complexity-threshold = 250
-too-many-arguments-threshold = 5
-too-many-lines-threshold = 100
+# === Documentation ===
+missing-docs-in-crate-items = false    # We'll enable via allow(missing_docs) per module
+doc-valid-idents = ["iMessage", "CSV", "TXT", "JSON", "SQL", "SQLite", "macOS", "NLP", "API", "DB"]
 
-# Test-related configurations
+# === Test Flexibility ===
 allow-unwrap-in-tests = true
-allow-expect-in-tests = true
+allow-expect-in-tests = true  
 allow-panic-in-tests = true
+allow-dbg-in-tests = true
 
-# Documentation options
-doc-valid-idents = ["RustFmt", "NLP", "iMessage", "CSV", "TXT"]
+# === Strictness Settings ===
+allow-mixed-uninlined-format-args = false  # Require consistent format string style
+suppress-restriction-lint-in-const = false # Don't suppress restrictions in const

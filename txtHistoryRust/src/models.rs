@@ -23,15 +23,15 @@ impl Contact {
     /// Returns a comma-separated string of phone and emails
     pub fn get_identifiers(&self) -> String {
         let mut identifiers = Vec::new();
-        
+
         if let Some(phone) = &self.phone {
             identifiers.push(phone.clone());
         }
-        
+
         for email in &self.emails {
             identifiers.push(email.clone());
         }
-        
+
         identifiers.join(",")
     }
 }
