@@ -234,7 +234,8 @@ async fn import_messages(
     info!("Using iMessage database at: {}", chat_db_path.display());
 
     // Create repository
-    let repo = IMessageDatabaseRepo::new(chat_db_path)?;
+    let repo = IMessageDatabaseRepo::new(chat_db_path)
+        .context("Failed to initialize iMessage database repository")?;
 
     // Parse date range
     let date_range = parse_date_range(start_date, end_date)?;
@@ -261,11 +262,13 @@ async fn import_messages(
 
     // Fetch messages
     info!("Fetching messages for contact: {}", contact.name);
-    let messages = repo.fetch_messages(&contact, &date_range).await?;
+    let messages = repo.fetch_messages(&contact, &date_range).await
+        .with_context(|| format!("Failed to fetch messages for contact: {}", contact.name))?;
     info!("Found {} messages", messages.len());
 
     // Write messages to files
-    write_messages_to_files(&messages, output_format, size, lines, effective_output_dir)?;
+    write_messages_to_files(&messages, output_format, size, lines, effective_output_dir)
+        .context("Failed to write messages to output files")?;
 
     Ok(())
 }
@@ -307,7 +310,8 @@ fn query_messages(
 
     // Query messages
     info!("Querying messages...");
-    let messages = db.get_messages_by_contact_name(&contact.name, &date_range)?;
+    let messages = db.get_messages_by_contact_name(&contact.name, &date_range)
+        .with_context(|| format!("Failed to query messages for contact: {}", contact.name))?;
     info!("Found {} messages", messages.len());
 
     // Write messages to files
@@ -426,6 +430,10 @@ fn process_messages(
 
 /// Get contact information by name
 fn get_contact_info(name: &str) -> Result<Contact> {
+    // Validate contact name
+    InputValidator::validate_contact_name(name)
+        .with_context(|| format!("Invalid contact name: {}", name))?;
+
     // For now, we'll just create a contact with the given name
     // In a real application, you might look up the contact in an address book
     let contact = match name {
@@ -492,6 +500,10 @@ fn parse_date_range(start_date: &Option<String>, end_date: &Option<String>) -> R
         None
     };
 
+    // Validate the date range
+    InputValidator::validate_date_range(start, end)
+        .context("Date range validation failed")?;
+
     Ok(DateRange { start, end })
 }
 
@@ -502,6 +514,17 @@ fn write_messages_to_files(
     if messages.is_empty() {
         warn!("No messages to write");
         return Ok(());
+    }
+
+    // Validate chunk parameters
+    if let Some(size) = size_mb {
+        InputValidator::validate_chunk_size(size)
+            .context("Invalid chunk size")?;
+    }
+    
+    if let Some(lines) = lines_per_chunk {
+        InputValidator::validate_lines_per_chunk(lines)
+            .context("Invalid lines per chunk")?;
     }
 
     // Determine chunking strategy
@@ -559,7 +582,8 @@ fn write_txt_file(messages: &[models::Message], file_path: &str) -> Result<()> {
     use std::fs::File;
     use std::io::{BufWriter, Write};
 
-    let file = File::create(file_path)?;
+    let file = File::create(file_path)
+        .with_context(|| format!("Failed to create TXT file: {}", file_path))?;
     let mut writer = BufWriter::new(file);
 
     for message in messages {
@@ -580,7 +604,8 @@ fn write_csv_file(messages: &[models::Message], file_path: &str) -> Result<()> {
     use std::fs::File;
     use std::io::BufWriter;
 
-    let file = File::create(file_path)?;
+    let file = File::create(file_path)
+        .with_context(|| format!("Failed to create CSV file: {}", file_path))?;
     let mut writer = csv::Writer::from_writer(BufWriter::new(file));
 
     // Write header
@@ -603,7 +628,8 @@ fn write_csv_file(messages: &[models::Message], file_path: &str) -> Result<()> {
 fn write_json_file(messages: &[models::Message], file_path: &str) -> Result<()> {
     use std::fs::File;
 
-    let file = File::create(file_path)?;
+    let file = File::create(file_path)
+        .with_context(|| format!("Failed to create JSON file: {}", file_path))?;
     let writer = std::io::BufWriter::new(file);
 
     // Write JSON directly using serde streaming to avoid intermediate vector

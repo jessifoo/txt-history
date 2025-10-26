@@ -98,6 +98,10 @@ impl Database {
             }
         }
 
+        // Run composite indexes migration
+        conn.execute_batch(include_str!("../migrations/2025-03-20-000000_add_composite_indexes/up.sql"))
+            .context("Failed to create composite indexes")?;
+
         Ok(())
     }
 
@@ -146,7 +150,8 @@ impl Database {
 
     /// Add a new message to the database if it doesn't already exist
     pub fn add_message(&self, new_message: NewMessage) -> Result<DbMessage> {
-        let conn = self.get_connection()?;
+        let conn = self.get_connection()
+            .context("Failed to get database connection for adding message")?;
 
         // Check if message already exists
         let existing: Option<DbMessage> = conn
@@ -220,7 +225,8 @@ impl Database {
     pub fn get_messages(
         &self, contact_name: &str, start_date: Option<NaiveDateTime>, end_date: Option<NaiveDateTime>,
     ) -> Result<Vec<DbMessage>> {
-        let conn = self.get_connection()?;
+        let conn = self.get_connection()
+            .with_context(|| format!("Failed to get database connection for querying messages for {}", contact_name))?;
 
         // Build query
         let mut query = String::from(format!("SELECT * FROM {} WHERE {} = ?", "messages", "sender"));
@@ -298,7 +304,8 @@ impl Database {
 
     /// Get a contact by name
     pub fn get_contact(&self, name: &str) -> Result<Option<DbContact>> {
-        let conn = self.get_connection()?;
+        let conn = self.get_connection()
+            .with_context(|| format!("Failed to get database connection for looking up contact: {}", name))?;
 
         let contact = conn
             .query_row(
@@ -313,7 +320,8 @@ impl Database {
 
     /// Add a new contact or update an existing one with improved identifier handling
     pub fn add_or_update_contact(&self, new_contact: NewContact) -> Result<DbContact> {
-        let conn = self.get_connection()?;
+        let conn = self.get_connection()
+            .with_context(|| format!("Failed to get database connection for adding/updating contact: {}", new_contact.name))?;
 
         // Check if contact already exists by name
         let existing: Option<DbContact> = conn

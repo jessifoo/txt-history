@@ -109,9 +109,12 @@ impl Repository {
     /// Save messages to a file in the specified format
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, file_path: &Path) -> Result<()> {
         match format {
-            OutputFormat::Txt => self.save_txt(messages, file_path).await?,
-            OutputFormat::Csv => self.save_csv(messages, file_path).await?,
-            OutputFormat::Json => self.save_json(messages, file_path).await?,
+            OutputFormat::Txt => self.save_txt(messages, file_path).await
+                .with_context(|| format!("Failed to save TXT file: {:?}", file_path))?,
+            OutputFormat::Csv => self.save_csv(messages, file_path).await
+                .with_context(|| format!("Failed to save CSV file: {:?}", file_path))?,
+            OutputFormat::Json => self.save_json(messages, file_path).await
+                .with_context(|| format!("Failed to save JSON file: {:?}", file_path))?,
         }
 
         Ok(())
@@ -119,7 +122,8 @@ impl Repository {
 
     /// Save messages to a text file
     async fn save_txt(&self, messages: &[Message], file_path: &Path) -> Result<()> {
-        let file = File::create(file_path)?;
+        let file = File::create(file_path)
+            .with_context(|| format!("Failed to create TXT file: {:?}", file_path))?;
         let mut writer = BufWriter::new(file);
 
         for message in messages {
@@ -138,7 +142,8 @@ impl Repository {
 
     /// Save messages to a CSV file
     async fn save_csv(&self, messages: &[Message], file_path: &Path) -> Result<()> {
-        let file = File::create(file_path)?;
+        let file = File::create(file_path)
+            .with_context(|| format!("Failed to create CSV file: {:?}", file_path))?;
         let mut writer = Writer::from_writer(file);
 
         // Write header row like Python script
@@ -160,7 +165,8 @@ impl Repository {
 
     /// Save messages to a JSON file
     async fn save_json(&self, messages: &[Message], file_path: &Path) -> Result<()> {
-        let file = File::create(file_path)?;
+        let file = File::create(file_path)
+            .with_context(|| format!("Failed to create JSON file: {:?}", file_path))?;
         let writer = BufWriter::new(file);
 
         // Write JSON directly using serde streaming to avoid intermediate vector
@@ -234,7 +240,8 @@ impl Repository {
 impl MessageRepository for Repository {
     async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>> {
         // Get messages from our database for this contact
-        let db_messages = self.db.get_messages_by_contact_name(&contact.name, date_range)?;
+        let db_messages = self.db.get_messages_by_contact_name(&contact.name, date_range)
+            .with_context(|| format!("Failed to fetch messages for contact: {}", contact.name))?;
         
         // db_messages is already Vec<Message>, no conversion needed
         Ok(db_messages)

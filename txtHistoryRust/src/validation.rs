@@ -118,10 +118,30 @@ impl InputValidator {
                 return Err(anyhow!("Dates cannot be in the future"));
             }
             
-            // Check if date range is not too far in the past (more than 10 years)
-            let ten_years_ago = now - chrono::Duration::days(365 * 10);
-            if start_date < ten_years_ago || end_date < ten_years_ago {
-                return Err(anyhow!("Date range too far in the past (max 10 years)"));
+            // Check if date range is not too far in the past (more than 20 years for messages)
+            let twenty_years_ago = now - chrono::Duration::days(365 * 20);
+            if start_date < twenty_years_ago {
+                tracing::warn!("Start date is more than 20 years in the past");
+            }
+            
+            // Warn about very large date ranges that may impact performance
+            let days = (end_date - start_date).num_days();
+            if days > 365 * 5 {
+                tracing::warn!(
+                    "Large date range ({} days / {:.1} years) may impact performance and memory usage",
+                    days,
+                    days as f64 / 365.0
+                );
+            }
+            
+            // Error on extremely large ranges
+            if days > 365 * 10 {
+                return Err(anyhow!(
+                    "Date range too large ({} days / {} years). Maximum supported range is 10 years. \
+                    Please split into smaller queries.",
+                    days,
+                    days / 365
+                ));
             }
         }
         
