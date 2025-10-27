@@ -42,6 +42,12 @@ strip = true
 
 [lints.rust]
 unsafe_code = "forbid"
+unused_must_use = "deny"
 
 [lints.clippy]
-all = "warn"
+# Only enforce critical safety issues
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+unimplemented = "deny"

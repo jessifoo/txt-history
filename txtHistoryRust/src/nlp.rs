@@ -26,18 +26,18 @@ impl NlpProcessor {
     pub fn new(version: &str) -> Result<Self> {
         // Initialize regular expressions for text cleaning
         let url_regex = Regex::new(r"https?://\S+|www\.\S+")
-            .map_err(|e| anyhow::anyhow!("Failed to compile URL regex: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to compile URL regex: {e}"))?;
         let emoji_regex = Regex::new(r"[\p{Emoji}]")
-            .map_err(|e| anyhow::anyhow!("Failed to compile emoji regex: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to compile emoji regex: {e}"))?;
         let special_chars_regex = Regex::new(r"[^\w\s]")
-            .map_err(|e| anyhow::anyhow!("Failed to compile special chars regex: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to compile special chars regex: {e}"))?;
         let extra_spaces_regex = Regex::new(r"\s+")
-            .map_err(|e| anyhow::anyhow!("Failed to compile spaces regex: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to compile spaces regex: {e}"))?;
 
         // Initialize stopwords for English
         let stopwords: HashSet<String> = get(LANGUAGE::English)
             .iter()
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .collect();
 
         // Initialize stemmer for English
@@ -85,6 +85,7 @@ impl NlpProcessor {
     }
 
     /// Clean the text by removing URLs, emojis, and normalizing whitespace
+    #[must_use]
     pub fn clean_text(&self, text: &str) -> String {
         // Normalize Unicode characters
         let normalized = text.nfc().collect::<String>();
@@ -112,9 +113,10 @@ impl NlpProcessor {
     }
 
     /// Tokenize the text into words
+    #[must_use]
     pub fn tokenize(&self, text: &str) -> Vec<String> {
         text.split_whitespace()
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .filter(|s| !s.is_empty() && !self.stopwords.contains(s))
             .collect()
     }
@@ -142,14 +144,14 @@ impl NlpProcessor {
                 let words: Vec<&str> = text.split_whitespace().collect();
 
                 for (i, word) in words.iter().enumerate() {
-                    if !word.is_empty() && word.chars().next().map_or(false, |c| c.is_uppercase()) {
+                    if !word.is_empty() && word.chars().next().is_some_and(char::is_uppercase) {
                         // Skip common sentence starters
                         if i > 0 || !["I", "The", "A", "An", "This", "That"].contains(word) {
                             let start = text.find(word).unwrap_or(0);
                             let end = start + word.len();
 
                             entities.push(NamedEntity {
-                                text: word.to_string(),
+                                text: (*word).to_string(),
                                 entity_type: "PERSON".to_string(), // Simplified
                                 start,
                                 end,
@@ -164,6 +166,7 @@ impl NlpProcessor {
     }
 
     /// Analyze sentiment of text using enhanced word-based analysis
+    #[must_use]
     pub fn analyze_sentiment(&self, text: &str) -> f32 {
         // Enhanced sentiment analysis with weighted words and context awareness
         let positive_words = [
@@ -351,7 +354,7 @@ impl NlpProcessor {
             // Get the message from the database
             let message = db
                 .get_message_by_id(message_id)?
-                .context(format!("Message with ID {} not found", message_id))?;
+                .context(format!("Message with ID {message_id} not found"))?;
 
             // Skip messages without text
             if message.text.is_none() {

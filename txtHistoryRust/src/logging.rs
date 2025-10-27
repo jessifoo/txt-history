@@ -12,7 +12,7 @@ pub fn init_logging(log_level: Option<&str>, log_file: Option<&Path>) -> Result<
             let level = log_level.unwrap_or("info");
             EnvFilter::try_new(level)
         })
-        .map_err(|e| anyhow::anyhow!("Failed to create log filter: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to create log filter: {e}"))?;
 
     // Create registry
     let registry = Registry::default().with(env_filter);
@@ -54,6 +54,7 @@ pub struct OperationTimer {
 }
 
 impl OperationTimer {
+    #[must_use]
     pub fn new(operation: &str) -> Self {
         Self {
             operation: operation.to_string(),

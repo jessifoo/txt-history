@@ -44,7 +44,8 @@ pub struct Repository {
 
 impl Repository {
     /// Create a new repository
-    pub fn new(db: Database) -> Self {
+    #[must_use]
+    pub const fn new(db: Database) -> Self {
         Self { db }
     }
 
@@ -93,7 +94,7 @@ impl Repository {
             if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
                 let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
                 let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
-                format!("{}_{}", start_date, end_date)
+                format!("{start_date}_{end_date}")
             } else {
                 "no_messages".to_string()
             };
@@ -114,9 +115,9 @@ impl Repository {
 
             // Generate file names with contact name and date range
             let base_name = if chunks.len() == 1 {
-                format!("{}_{}", person_name, date_range_str)
+                format!("{person_name}_{date_range_str}")
             } else {
-                format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_num)
+                format!("{person_name}_{date_range_str}_chunk_{chunk_num}")
             };
 
             let base_path = output_path.join(base_name);
@@ -142,15 +143,15 @@ impl Repository {
             OutputFormat::Txt => self
                 .save_txt(messages, file_path)
                 .await
-                .with_context(|| format!("Failed to save TXT file: {:?}", file_path))?,
+                .with_context(|| format!("Failed to save TXT file: {file_path:?}"))?,
             OutputFormat::Csv => self
                 .save_csv(messages, file_path)
                 .await
-                .with_context(|| format!("Failed to save CSV file: {:?}", file_path))?,
+                .with_context(|| format!("Failed to save CSV file: {file_path:?}"))?,
             OutputFormat::Json => self
                 .save_json(messages, file_path)
                 .await
-                .with_context(|| format!("Failed to save JSON file: {:?}", file_path))?,
+                .with_context(|| format!("Failed to save JSON file: {file_path:?}"))?,
         }
 
         Ok(())
@@ -159,7 +160,7 @@ impl Repository {
     /// Save messages to a text file
     async fn save_txt(&self, messages: &[Message], file_path: &Path) -> Result<()> {
         let file = File::create(file_path)
-            .with_context(|| format!("Failed to create TXT file: {:?}", file_path))?;
+            .with_context(|| format!("Failed to create TXT file: {file_path:?}"))?;
         let mut writer = BufWriter::new(file);
 
         for message in messages {
@@ -179,15 +180,15 @@ impl Repository {
     /// Save messages to a CSV file
     async fn save_csv(&self, messages: &[Message], file_path: &Path) -> Result<()> {
         let file = File::create(file_path)
-            .with_context(|| format!("Failed to create CSV file: {:?}", file_path))?;
+            .with_context(|| format!("Failed to create CSV file: {file_path:?}"))?;
         let mut writer = Writer::from_writer(file);
 
         // Write header row like Python script
-        writer.write_record(&["ID", "Sender", "Datetime", "Message"])?;
+        writer.write_record(["ID", "Sender", "Datetime", "Message"])?;
 
         // Add ID column with autoincrementing values starting from 1
         for (i, message) in messages.iter().enumerate() {
-            writer.write_record(&[
+            writer.write_record([
                 &(i + 1).to_string(), // ID column
                 &message.sender,
                 &message.timestamp.format("%b %d, %Y %r").to_string(),
@@ -202,7 +203,7 @@ impl Repository {
     /// Save messages to a JSON file
     async fn save_json(&self, messages: &[Message], file_path: &Path) -> Result<()> {
         let file = File::create(file_path)
-            .with_context(|| format!("Failed to create JSON file: {:?}", file_path))?;
+            .with_context(|| format!("Failed to create JSON file: {file_path:?}"))?;
         let writer = BufWriter::new(file);
 
         // Write JSON directly using serde streaming to avoid intermediate vector
@@ -316,10 +317,10 @@ impl MessageRepository for Repository {
             }
             OutputFormat::Csv => {
                 let mut csv_writer = Writer::from_writer(writer);
-                csv_writer.write_record(&["Sender", "Timestamp", "Content"])?;
+                csv_writer.write_record(["Sender", "Timestamp", "Content"])?;
 
                 for message in messages {
-                    csv_writer.write_record(&[
+                    csv_writer.write_record([
                         &message.sender,
                         &message.timestamp.format("%b %d, %Y %r").to_string(),
                         &message.content,
@@ -414,7 +415,7 @@ impl MessageRepository for Repository {
             if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
                 let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
                 let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
-                format!("{}_{}", start_date, end_date)
+                format!("{start_date}_{end_date}")
             } else {
                 "no_messages".to_string()
             };
@@ -424,12 +425,15 @@ impl MessageRepository for Repository {
 
             // Generate file names with contact name and date range
             let base_name = if chunks.len() == 1 {
-                format!("{}_{}", person_name, date_range_str)
+                format!("{person_name}_{date_range_str}")
             } else {
-                format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_num)
+                format!("{person_name}_{date_range_str}_chunk_{chunk_num}")
             };
 
-            let base_path = output_path.parent().unwrap().join(base_name);
+            let base_path = output_path
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("Invalid output path: no parent directory"))?
+                .join(base_name);
 
             // Save CSV file
             let csv_path = base_path.with_extension("csv");
@@ -459,8 +463,7 @@ impl IMessageDatabaseRepo {
         // Validate that the path exists
         if !chat_db_path.exists() {
             return Err(anyhow::anyhow!(
-                "iMessage database path does not exist: {:?}",
-                chat_db_path
+                "iMessage database path does not exist: {chat_db_path:?}"
             ));
         }
 
@@ -477,7 +480,7 @@ impl IMessageDatabaseRepo {
     async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path)
-            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {e}"))?;
 
         // Use direct SQL query with index instead of full table scan
         // The handle table has an id column which contains phone/email
@@ -495,7 +498,7 @@ impl IMessageDatabaseRepo {
                     })
                 })
                 .optional()
-                .map_err(|e| anyhow::anyhow!("Failed to query handle: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to query handle: {e}"))?;
 
             if handle.is_some() {
                 return Ok(handle);
@@ -514,7 +517,7 @@ impl IMessageDatabaseRepo {
                     })
                 })
                 .optional()
-                .map_err(|e| anyhow::anyhow!("Failed to query handle: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to query handle: {e}"))?;
 
             if handle.is_some() {
                 return Ok(handle);
@@ -529,7 +532,7 @@ impl IMessageDatabaseRepo {
     async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path)
-            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {e}"))?;
 
         // Use direct SQL query with index instead of full table scan
         use rusqlite::OptionalExtension;
@@ -546,7 +549,7 @@ impl IMessageDatabaseRepo {
                 })
             })
             .optional()
-            .map_err(|e| anyhow::anyhow!("Failed to query chat: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to query chat: {e}"))?;
 
         Ok(chat)
     }
@@ -610,26 +613,24 @@ impl MessageRepository for IMessageDatabaseRepo {
         date_range: &DateRange,
     ) -> Result<Vec<Message>> {
         // Find the handle for this contact
-        let handle = match self.find_handle(contact).await? {
-            Some(h) => h,
-            None => {
-                error!("No handle found for contact: {:?}", contact);
-                return Ok(Vec::new());
-            }
+        let handle = if let Some(h) = self.find_handle(contact).await? {
+            h
+        } else {
+            error!("No handle found for contact: {:?}", contact);
+            return Ok(Vec::new());
         };
 
         // Find the chat for this handle
-        let chat = match self.find_chat_by_handle(&handle).await? {
-            Some(c) => c,
-            None => {
-                error!("No chat found for handle: {:?}", handle);
-                return Ok(Vec::new());
-            }
+        let chat = if let Some(c) = self.find_chat_by_handle(&handle).await? {
+            c
+        } else {
+            error!("No chat found for handle: {:?}", handle);
+            return Ok(Vec::new());
         };
 
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path)
-            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {e}"))?;
 
         // Use indexed query instead of full table scan
         // Query messages by chat_id with date filtering using SQL
@@ -644,20 +645,18 @@ impl MessageRepository for IMessageDatabaseRepo {
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(chat.rowid)];
 
         // Add date range filters to the SQL query for better performance
-        if date_range.start.is_some() {
+        if let Some(start_dt) = date_range.start {
             query.push_str(" AND date >= ?");
             // Convert DateTime to Apple's epoch (nanoseconds since 2001-01-01)
-            let apple_epoch = date_range.start.unwrap().timestamp_nanos_opt().unwrap_or(0)
-                / 1_000_000_000
-                - 978307200; // Offset from 2001-01-01 to 1970-01-01
+            let apple_epoch =
+                start_dt.timestamp_nanos_opt().unwrap_or(0) / 1_000_000_000 - 978_307_200; // Offset from 2001-01-01 to 1970-01-01
             params.push(Box::new(apple_epoch));
         }
 
-        if date_range.end.is_some() {
+        if let Some(end_dt) = date_range.end {
             query.push_str(" AND date <= ?");
-            let apple_epoch = date_range.end.unwrap().timestamp_nanos_opt().unwrap_or(0)
-                / 1_000_000_000
-                - 978307200;
+            let apple_epoch =
+                end_dt.timestamp_nanos_opt().unwrap_or(0) / 1_000_000_000 - 978_307_200;
             params.push(Box::new(apple_epoch));
         }
 
@@ -665,7 +664,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
         let mut stmt = db
             .prepare(&query)
-            .map_err(|e| anyhow::anyhow!("Failed to prepare query: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to prepare query: {e}"))?;
 
         let message_iter = stmt
             .query_map(rusqlite::params_from_iter(params.iter()), |row| {
@@ -676,7 +675,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
                 Ok((is_from_me, date, text))
             })
-            .map_err(|e| anyhow::anyhow!("Failed to execute query: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to execute query: {e}"))?;
 
         let mut messages = Vec::new();
         for result in message_iter {
@@ -684,12 +683,13 @@ impl MessageRepository for IMessageDatabaseRepo {
                 Ok((is_from_me, date_value, text_opt)) => {
                     // Convert Apple epoch to DateTime
                     use chrono::TimeZone;
-                    let timestamp = match chrono::Utc.timestamp_opt(date_value + 978307200, 0) {
-                        chrono::LocalResult::Single(dt) => dt.with_timezone(&Local),
-                        _ => {
-                            error!("Failed to parse message date: {}, skipping", date_value);
-                            continue;
-                        }
+                    let timestamp = if let chrono::LocalResult::Single(dt) =
+                        chrono::Utc.timestamp_opt(date_value + 978307200, 0)
+                    {
+                        dt.with_timezone(&Local)
+                    } else {
+                        error!("Failed to parse message date: {}, skipping", date_value);
+                        continue;
                     };
 
                     if let Some(text) = text_opt {
@@ -743,7 +743,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                 let mut writer = Writer::from_writer(file);
 
                 for message in messages {
-                    writer.write_record(&[
+                    writer.write_record([
                         &message.sender,
                         &message
                             .timestamp
@@ -797,7 +797,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                 email: c.email,
                 emails: vec![], // Initialize empty emails vector
             },
-            None => return Err(anyhow::anyhow!("Contact not found: {}", person_name)),
+            None => return Err(anyhow::anyhow!("Contact not found: {person_name}")),
         };
 
         // Fetch messages
@@ -816,8 +816,7 @@ impl MessageRepository for IMessageDatabaseRepo {
         // If no messages, return early
         if messages.is_empty() {
             return Err(anyhow::anyhow!(
-                "No messages found for contact: {}",
-                person_name
+                "No messages found for contact: {person_name}"
             ));
         }
 
@@ -826,7 +825,7 @@ impl MessageRepository for IMessageDatabaseRepo {
             if let (Some(first_msg), Some(last_msg)) = (messages.first(), messages.last()) {
                 let start_date = first_msg.timestamp.format("%Y-%m-%d").to_string();
                 let end_date = last_msg.timestamp.format("%Y-%m-%d").to_string();
-                format!("{}_{}", start_date, end_date)
+                format!("{start_date}_{end_date}")
             } else {
                 "no_messages".to_string()
             };
@@ -840,9 +839,9 @@ impl MessageRepository for IMessageDatabaseRepo {
             for (i, chunk) in messages.chunks(lines).enumerate() {
                 let chunk_num = i + 1;
                 let base_name = if messages.len() <= lines {
-                    format!("{}_{}", person_name, date_range_str)
+                    format!("{person_name}_{date_range_str}")
                 } else {
-                    format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_num)
+                    format!("{person_name}_{date_range_str}_chunk_{chunk_num}")
                 };
                 let base_path = output_path.join(base_name);
 
@@ -863,8 +862,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                     && !current_chunk.is_empty()
                 {
                     // Save the current chunk
-                    let base_name =
-                        format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_index);
+                    let base_name = format!("{person_name}_{date_range_str}_chunk_{chunk_index}");
                     let base_path = output_path.join(base_name);
 
                     self.save_messages(&current_chunk, format, &base_path)
@@ -884,9 +882,9 @@ impl MessageRepository for IMessageDatabaseRepo {
             // Save the last chunk if not empty
             if !current_chunk.is_empty() {
                 let base_name = if chunk_index == 1 {
-                    format!("{}_{}", person_name, date_range_str)
+                    format!("{person_name}_{date_range_str}")
                 } else {
-                    format!("{}_{}_chunk_{}", person_name, date_range_str, chunk_index)
+                    format!("{person_name}_{date_range_str}_chunk_{chunk_index}")
                 };
                 let base_path = output_path.join(base_name);
 
@@ -896,7 +894,7 @@ impl MessageRepository for IMessageDatabaseRepo {
             }
         } else {
             // No chunking, just one file with all messages
-            let base_name = format!("{}_{}", person_name, date_range_str);
+            let base_name = format!("{person_name}_{date_range_str}");
             let base_path = output_path.join(base_name);
 
             self.save_messages(&messages, format, &base_path).await?;

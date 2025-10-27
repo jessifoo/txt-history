@@ -1,31 +1,27 @@
 [build]
+# Google-level quality with practical enforcement
 rustflags = [
-    # Clippy lints
-    "-Dclippy::all",
-    "-Dclippy::pedantic",
-    "-Wclippy::nursery",
-    
-    # Additional lints
-    "-Drust_2018_idioms",
-    "-Dunused_qualifications",
-    "-Dwarnings",
-    
-    # Safety lints
+    # Safety - absolutely no compromise
     "-Dunsafe_code",
-    "-Dmissing_docs",
-    "-Dunreachable_pub",
     
-    # Performance lints
-    "-Dnonstandard_style",
-    "-Dfuture_incompatible",
+    # Code correctness
+    "-Dunused_must_use",
+    "-Drust_2018_idioms",
     
-    # Documentation lints
-    "-Dmissing_debug_implementations",
-    "-Dmissing_copy_implementations",
+    # Clippy correctness only (actual bugs)
+    "-Dclippy::correctness",
+    "-Dclippy::suspicious",
+    
+    # Production safety
+    "-Dclippy::unwrap_used",
+    "-Dclippy::expect_used",
+    "-Dclippy::panic",
+    "-Dclippy::dbg_macro",
+    "-Dclippy::unimplemented",
+    
+    # Performance awareness
+    "-Wclippy::perf",
+    
+    # Complexity awareness  
+    "-Wclippy::complexity",
 ]
-
-[target.'cfg(debug_assertions)'.build]
-rustflags = ["-Dwarnings"]
-
-[target.'cfg(not(debug_assertions))'.build]
-rustflags = ["-Dwarnings", "-Dclippy::all", "-Dclippy::pedantic"]

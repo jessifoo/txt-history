@@ -88,7 +88,7 @@ impl Default for AppConfig {
                 enable_compression: false,
             },
             imessage: IMessageConfig {
-                database_path: "".to_string(), // Will be dynamically detected
+                database_path: String::new(), // Will be dynamically detected
                 connection_timeout_secs: 30,
                 read_timeout_secs: 60,
                 max_retries: 3,
@@ -108,11 +108,11 @@ impl AppConfig {
             // Add environment variables with prefix
             .add_source(Environment::with_prefix("TXT_HISTORY").separator("_"))
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to load configuration: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to load configuration: {e}"))?;
 
-        let app_config: AppConfig = config
+        let app_config: Self = config
             .try_deserialize()
-            .map_err(|e| anyhow::anyhow!("Failed to deserialize configuration: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to deserialize configuration: {e}"))?;
 
         // Validate configuration
         app_config.validate()?;
@@ -136,18 +136,16 @@ impl AppConfig {
         let valid_levels = ["trace", "debug", "info", "warn", "error"];
         if !valid_levels.contains(&self.logging.level.as_str()) {
             return Err(anyhow::anyhow!(
-                "Invalid log level: {}. Must be one of: {:?}",
-                self.logging.level,
-                valid_levels
+                "Invalid log level: {}. Must be one of: {valid_levels:?}",
+                self.logging.level
             ));
         }
 
         let valid_formats = ["text", "json"];
         if !valid_formats.contains(&self.logging.format.as_str()) {
             return Err(anyhow::anyhow!(
-                "Invalid log format: {}. Must be one of: {:?}",
-                self.logging.format,
-                valid_formats
+                "Invalid log format: {}. Must be one of: {valid_formats:?}",
+                self.logging.format
             ));
         }
 
@@ -163,9 +161,8 @@ impl AppConfig {
         let valid_formats = ["txt", "csv", "json"];
         if !valid_formats.contains(&self.export.default_format.as_str()) {
             return Err(anyhow::anyhow!(
-                "Invalid export format: {}. Must be one of: {:?}",
-                self.export.default_format,
-                valid_formats
+                "Invalid export format: {}. Must be one of: {valid_formats:?}",
+                self.export.default_format
             ));
         }
 
@@ -188,11 +185,13 @@ impl AppConfig {
     }
 
     /// Get database URL from environment or config
+    #[must_use]
     pub fn get_database_url(&self) -> String {
         std::env::var("DATABASE_URL").unwrap_or_else(|_| self.database.url.clone())
     }
 
     /// Get iMessage database path from environment or config
+    #[must_use]
     pub fn get_imessage_db_path(&self) -> String {
         std::env::var("IMESSAGE_DB_PATH").unwrap_or_else(|_| {
             if self.imessage.database_path.is_empty() {
@@ -218,6 +217,7 @@ impl AppConfig {
     }
 
     /// Get log level from environment or config
+    #[must_use]
     pub fn get_log_level(&self) -> String {
         std::env::var("RUST_LOG").unwrap_or_else(|_| self.logging.level.clone())
     }

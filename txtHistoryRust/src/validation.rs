@@ -3,6 +3,7 @@ use chrono::{DateTime, Local};
 use std::path::Path;
 
 /// Validation utilities for input sanitization and edge case handling
+#[derive(Debug, Copy, Clone)]
 pub struct InputValidator;
 
 impl InputValidator {
@@ -39,9 +40,9 @@ impl InputValidator {
             .collect::<String>();
 
         // Check if it contains only digits and + at the start
-        let digits_only = cleaned.chars().filter(|c| c.is_ascii_digit()).count();
+        let digits_only = cleaned.chars().filter(char::is_ascii_digit).count();
 
-        if digits_only < 7 || digits_only > 15 {
+        if !(7..=15).contains(&digits_only) {
             return Err(anyhow!("Phone number must be between 7 and 15 digits"));
         }
 
@@ -96,7 +97,7 @@ impl InputValidator {
 
         // Check for path traversal attempts
         let path_str = path.to_string_lossy();
-        if path_str.contains("..") || path_str.contains("~") {
+        if path_str.contains("..") || path_str.contains('~') {
             return Err(anyhow!(
                 "File path contains potentially dangerous characters"
             ));
@@ -145,9 +146,8 @@ impl InputValidator {
             // Error on extremely large ranges
             if days > 365 * 10 {
                 return Err(anyhow!(
-                    "Date range too large ({} days / {} years). Maximum supported range is 10 years. \
+                    "Date range too large ({days} days / {} years). Maximum supported range is 10 years. \
                     Please split into smaller queries.",
-                    days,
                     days / 365
                 ));
             }
@@ -217,6 +217,7 @@ impl InputValidator {
     }
 
     /// Sanitize text input
+    #[must_use]
     pub fn sanitize_text(text: &str) -> String {
         text.chars()
             .filter(|c| !c.is_control() || *c == '\n' || *c == '\t' || *c == '\r')
@@ -245,16 +246,16 @@ impl InputValidator {
     /// Validate iMessage database path
     pub fn validate_imessage_db_path(path: &Path) -> Result<()> {
         if !path.exists() {
-            return Err(anyhow!("iMessage database path does not exist: {:?}", path));
+            return Err(anyhow!("iMessage database path does not exist: {path:?}"));
         }
 
         if !path.is_file() {
-            return Err(anyhow!("iMessage database path is not a file: {:?}", path));
+            return Err(anyhow!("iMessage database path is not a file: {path:?}"));
         }
 
         // Check file permissions (readable)
         if std::fs::metadata(path)
-            .map_err(|e| anyhow!("Cannot access iMessage database: {}", e))?
+            .map_err(|e| anyhow!("Cannot access iMessage database: {e}"))?
             .permissions()
             .readonly()
         {

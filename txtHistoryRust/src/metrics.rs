@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::time::Duration;
 
 /// Simple metrics collection for the application
+#[derive(Default)]
 pub struct MetricsCollector {
     // Simple counters for tracking operations
     pub db_operations_total: u64,
@@ -13,23 +14,9 @@ pub struct MetricsCollector {
     pub errors_total: u64,
 }
 
-impl Default for MetricsCollector {
-    fn default() -> Self {
-        Self {
-            db_operations_total: 0,
-            messages_processed_total: 0,
-            messages_imported_total: 0,
-            messages_exported_total: 0,
-            nlp_operations_total: 0,
-            export_operations_total: 0,
-            errors_total: 0,
-        }
-    }
-}
-
 impl MetricsCollector {
     /// Initialize metrics collection
-    pub fn init() -> Result<()> {
+    pub const fn init() -> Result<()> {
         // Simple initialization - no external dependencies
         Ok(())
     }
@@ -134,6 +121,7 @@ impl MetricsCollector {
     }
 
     /// Get current metrics summary
+    #[must_use]
     pub fn get_summary(&self) -> String {
         format!(
             "Metrics Summary:\n\
@@ -162,6 +150,7 @@ pub struct MetricsTimer {
 }
 
 impl MetricsTimer {
+    #[must_use]
     pub fn new(operation: &str) -> Self {
         Self {
             operation: operation.to_string(),

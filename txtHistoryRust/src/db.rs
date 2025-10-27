@@ -9,6 +9,7 @@ use crate::models::{
 };
 
 // Custom connection manager for rusqlite
+#[derive(Debug)]
 pub struct SqliteConnectionManager {
     path: String,
 }
@@ -30,7 +31,7 @@ impl r2d2::ManageConnection for SqliteConnectionManager {
     }
 
     fn is_valid(&self, conn: &mut Connection) -> std::result::Result<(), rusqlite::Error> {
-        conn.execute_batch("").map_err(Into::into)
+        conn.execute_batch("")
     }
 
     fn has_broken(&self, _conn: &mut Connection) -> bool {
@@ -43,7 +44,7 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 pub type DbConnection = r2d2::PooledConnection<SqliteConnectionManager>;
 
 /// Database manager for handling connections and operations
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Database {
     pool: DbPool,
 }
@@ -95,9 +96,7 @@ impl Database {
                     use rusqlite::ffi::SQLITE_ERROR;
                     if sqlite_err.code == rusqlite::ErrorCode::Unknown
                         && sqlite_err.extended_code == SQLITE_ERROR
-                        && msg
-                            .as_ref()
-                            .map_or(false, |m| m.contains("duplicate column"))
+                        && msg.as_ref().is_some_and(|m| m.contains("duplicate column"))
                     {
                         // Column already exists, safe to ignore
                         tracing::debug!("Migration already applied (columns exist)");
@@ -267,17 +266,11 @@ impl Database {
         end_date: Option<NaiveDateTime>,
     ) -> Result<Vec<DbMessage>> {
         let conn = self.get_connection().with_context(|| {
-            format!(
-                "Failed to get database connection for querying messages for {}",
-                contact_name
-            )
+            format!("Failed to get database connection for querying messages for {contact_name}")
         })?;
 
         // Build query
-        let mut query = String::from(format!(
-            "SELECT * FROM {} WHERE {} = ?",
-            "messages", "sender"
-        ));
+        let mut query = format!("SELECT * FROM {} WHERE {} = ?", "messages", "sender");
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(contact_name.to_string())];
 
         // Apply date filters if provided
@@ -308,7 +301,7 @@ impl Database {
         Ok(results)
     }
 
-    /// Map a database row to a DbMessage
+    /// Map a database row to a `DbMessage`
     fn map_db_message(&self, row: &Row<'_>) -> rusqlite::Result<DbMessage> {
         Ok(DbMessage {
             id: row.get(0)?,
@@ -326,7 +319,7 @@ impl Database {
         })
     }
 
-    /// Map a database row to a DbContact
+    /// Map a database row to a `DbContact`
     fn map_db_contact(&self, row: &Row<'_>) -> rusqlite::Result<DbContact> {
         Ok(DbContact {
             id: row.get(0)?,
@@ -355,10 +348,7 @@ impl Database {
     /// Get a contact by name
     pub fn get_contact(&self, name: &str) -> Result<Option<DbContact>> {
         let conn = self.get_connection().with_context(|| {
-            format!(
-                "Failed to get database connection for looking up contact: {}",
-                name
-            )
+            format!("Failed to get database connection for looking up contact: {name}")
         })?;
 
         let contact = conn
@@ -465,7 +455,7 @@ impl Database {
         // Get the contact
         let _contact = self
             .get_contact(person_name)?
-            .ok_or_else(|| anyhow::anyhow!("Contact not found: {}", person_name))?;
+            .ok_or_else(|| anyhow::anyhow!("Contact not found: {person_name}"))?;
 
         // Get messages where the sender is the person
         let mut query = format!("SELECT * FROM {} WHERE {} = ?", "messages", "sender");
@@ -580,7 +570,7 @@ impl Database {
         }
     }
 
-    /// Map a database row to a DbProcessedMessage
+    /// Map a database row to a `DbProcessedMessage`
     fn map_db_processed_message(&self, row: &Row<'_>) -> rusqlite::Result<DbProcessedMessage> {
         Ok(DbProcessedMessage {
             id: row.get(0)?,
