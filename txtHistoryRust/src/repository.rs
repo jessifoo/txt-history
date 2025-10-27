@@ -1,24 +1,15 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{Local, TimeZone};
 use csv::Writer;
-use imessage_database::tables::{
-    chat::Chat,
-    handle::Handle,
-    messages::Message as ImessageMessage,
-    table::{get_connection, Table},
-};
-use serde_json;
+use imessage_database::tables::{chat::Chat, handle::Handle, table::get_connection};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tracing::{error, info};
 
-use crate::models::{Contact, DateRange, OutputFormat};
-use crate::{
-    db::Database,
-    models::{Message, NewMessage},
-};
+use crate::db::Database;
+use crate::models::{Contact, DateRange, Message, NewMessage, OutputFormat};
 
 /// Repository trait for interacting with message data
 #[async_trait]
@@ -216,6 +207,7 @@ impl Repository {
 
         // Write JSON directly using serde streaming to avoid intermediate vector
         use serde::ser::SerializeSeq;
+        use serde::Serializer;
         let mut ser = serde_json::Serializer::new(writer);
         let mut seq = ser.serialize_seq(Some(messages.len()))?;
 
@@ -338,6 +330,7 @@ impl MessageRepository for Repository {
             OutputFormat::Json => {
                 // Write JSON directly using serde streaming to avoid intermediate vector
                 use serde::ser::SerializeSeq;
+                use serde::Serializer;
                 let mut ser = serde_json::Serializer::new(writer);
                 let mut seq = ser.serialize_seq(Some(messages.len()))?;
 
@@ -492,15 +485,13 @@ impl IMessageDatabaseRepo {
 
         // Try to find by phone first
         if let Some(phone) = &contact.phone {
-            let query = "SELECT ROWID, id, country, service, uncanonicalized_id FROM handle WHERE id = ? LIMIT 1";
+            let query = "SELECT ROWID, id FROM handle WHERE id = ? LIMIT 1";
             let handle: Option<Handle> = db
                 .query_row(query, [phone], |row| {
                     Ok(Handle {
                         rowid: row.get(0)?,
                         id: row.get(1)?,
-                        country: row.get(2).ok(),
-                        service: row.get(3)?,
-                        uncanonicalized_id: row.get(4).ok(),
+                        person_centric_id: None,
                     })
                 })
                 .optional()
@@ -513,15 +504,13 @@ impl IMessageDatabaseRepo {
 
         // Then try by email
         if let Some(email) = &contact.email {
-            let query = "SELECT ROWID, id, country, service, uncanonicalized_id FROM handle WHERE id = ? LIMIT 1";
+            let query = "SELECT ROWID, id FROM handle WHERE id = ? LIMIT 1";
             let handle: Option<Handle> = db
                 .query_row(query, [email], |row| {
                     Ok(Handle {
                         rowid: row.get(0)?,
                         id: row.get(1)?,
-                        country: row.get(2).ok(),
-                        service: row.get(3)?,
-                        uncanonicalized_id: row.get(4).ok(),
+                        person_centric_id: None,
                     })
                 })
                 .optional()
@@ -545,20 +534,15 @@ impl IMessageDatabaseRepo {
         // Use direct SQL query with index instead of full table scan
         use rusqlite::OptionalExtension;
 
-        let query = "SELECT ROWID, chat_identifier, service_name, display_name, participants, is_filtered, \
-                            is_recovered, is_blackholed FROM chat WHERE chat_identifier = ? LIMIT 1";
+        let query = "SELECT ROWID, chat_identifier FROM chat WHERE chat_identifier = ? LIMIT 1";
 
         let chat: Option<Chat> = db
             .query_row(query, [&handle.id], |row| {
                 Ok(Chat {
                     rowid: row.get(0)?,
                     chat_identifier: row.get(1)?,
-                    service_name: row.get(2).ok(),
-                    display_name: row.get(3).ok(),
-                    participants: vec![], // Will be populated if needed
-                    is_filtered: row.get(4).ok(),
-                    is_recovered: row.get(5).ok(),
-                    is_blackholed: row.get(6).ok(),
+                    service_name: None,
+                    display_name: None,
                 })
             })
             .optional()
@@ -646,9 +630,6 @@ impl MessageRepository for IMessageDatabaseRepo {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path)
             .map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
-
-        // Get the time offset for date conversion
-        let offset = imessage_database::util::dates::get_offset();
 
         // Use indexed query instead of full table scan
         // Query messages by chat_id with date filtering using SQL
@@ -781,6 +762,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
                 // Write JSON directly using serde streaming to avoid intermediate vector
                 use serde::ser::SerializeSeq;
+                use serde::Serializer;
                 let mut ser = serde_json::Serializer::pretty(writer);
                 let mut seq = ser.serialize_seq(Some(messages.len()))?;
 
