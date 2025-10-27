@@ -18,91 +18,81 @@ csv = "1.3" # CSV file handling
 rusqlite = { version = "0.37", features = ["chrono", "bundled"] } # SQLite database access
 imessage-database = "3.1.0" # iMessage database access
 regex = "1.11"  # Regular expressions
-rust-stemmers = "1.2.0" # Text stemming for NLP
-rust_tokenizers = "8.1" # Text tokenization for NLP
+# rust-stemmers = "1.2.0" # Text stemming for NLP - TEMP DISABLED
 serde = { version = "1.0", features = ["derive"] } # Serialization/deserialization
 serde_json = "1.0"  # JSON serialization/deserialization
-stop-words = "0.8"  # Stop words for NLP
-tokio = { version = "1.44", features = ["full"] } # Async runtime
+# stop-words = "0.8"  # Stop words for NLP - TEMP DISABLED
+tokio = { version = "1.44", features = ["rt", "rt-multi-thread", "macros"] } # Async runtime - minimal features
 unicode-normalization = "0.1" # Unicode normalization
-whatlang = "0.16" # Language detection
 async-trait = "0.1" # Async traits
-sled = "0.34" # Embedded database
-bincode = "1.3" # Binary serialization
-rand = "0.8" # Random number generation
+# bincode = "1.3" # Binary serialization - TEMP DISABLED
+# rand = "0.8" # Random number generation - TEMP DISABLED
 r2d2 = "0.8" # Connection pooling
 thiserror = "1.0" # Error definition
-diesel = { version = "2.2", features = ["sqlite", "chrono"] } # ORM for SQLite
 tracing = "0.1" # Structured logging
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] } # Log formatting
 tracing-appender = "0.2" # Log file rotation
-config = "0.14" # Configuration management
-serde_yaml = "0.9" # YAML configuration support
-metrics = "0.22" # Metrics collection
+# config = "0.14" # Configuration management - TEMP DISABLED
+# serde_yaml = "0.9" # YAML configuration support - TEMP DISABLED
 
-# Optional advanced features
-rust-bert = { version = "0.21.0", optional = true }
+# Temporarily disabled due to edition 2024 dependency conflicts
+# These can be re-enabled when Rust is upgraded
+# rust_tokenizers = "8.1" # Text tokenization for NLP
+# whatlang = "0.16" # Language detection
+# sled = "0.34" # Embedded database
+# metrics = "0.22" # Metrics collection
+# diesel = { version = "2.2", features = ["sqlite", "chrono"] } # ORM for SQLite
+# rust-bert = { version = "0.21.0", optional = true }
 
 [dev-dependencies]
-criterion = "0.5"  # Benchmarking
-proptest = "1.0"   # Property-based testing
-mockall = "0.12"   # Mocking framework
-tempfile = "3.0"   # Temporary files for testing
+# Core testing dependencies only
+tempfile = "3.0"
+pretty_assertions = "1.4"
 
 [features]
 default = []
-advanced-nlp = ["rust-bert"]
 
 [profile.release]
-lto = true           # Link-time optimization
-codegen-units = 1    # Better optimization
-opt-level = 3        # Maximum optimization
-strip = true         # Strip symbols for smaller binary
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
 
 [profile.dev]
-opt-level = 0        # Fast compilation
-debug = true         # Full debug info
+opt-level = 0
+debug = true
 
 [profile.test]
-opt-level = 1        # Some optimization for faster tests
+opt-level = 1
 
 # Linting configuration
 [lints.rust]
-unsafe_code = "forbid"              # No unsafe code
-missing_docs = "warn"               # Encourage documentation
-unused_must_use = "deny"            # Must handle Result types
-unreachable_pub = "warn"            # No unnecessary pub exports
+unsafe_code = "forbid"
+missing_docs = "warn"
+unused_must_use = "deny"
+unreachable_pub = "warn"
 
 [lints.clippy]
-# Correctness (deny all - these are bugs)
 all = "deny"
-
-# Style & clarity
-pedantic = "warn"                   # Pedantic style warnings
-nursery = "warn"                    # Experimental lints
-
-# Specific allows (override pedantic where sensible)
-missing_errors_doc = "allow"        # Can be verbose
-missing_panics_doc = "allow"        # Can be verbose
-module_name_repetitions = "allow"   # Sometimes necessary
-similar_names = "allow"             # start/end are fine
-
-# Performance
+pedantic = "warn"
+nursery = "warn"
 perf = "warn"
-
-# Complexity
 complexity = "warn"
 cognitive_complexity = "warn"
-
-# Cargo
 cargo = "warn"
 
-# Specific denies (treat as errors)
-unwrap_used = "warn"                # Prefer proper error handling
-expect_used = "warn"                # Prefer proper error handling
-panic = "warn"                      # Avoid panics in production code
-todo = "warn"                       # TODOs should be tracked
-unimplemented = "deny"              # Must be implemented
-dbg_macro = "warn"                  # Remove debug prints
-print_stdout = "warn"               # Use logging instead
-print_stderr = "warn"               # Use logging instead
+# Specific overrides
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+similar_names = "allow"
+
+# Warnings for production code
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "deny"
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
