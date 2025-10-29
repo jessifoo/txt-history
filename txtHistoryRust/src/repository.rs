@@ -645,19 +645,19 @@ impl MessageRepository for IMessageDatabaseRepo {
                                 num_replies \
                          FROM message WHERE chat_id = ?".to_string();
 
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(chat.rowid)];
+        const APPLE_EPOCH_OFFSET_NANOS: i64 = 978_307_200 * 1_000_000_000;
 
-        // Add date range filters to the SQL query for better performance
         if let Some(start_dt) = date_range.start {
             query.push_str(" AND date >= ?");
             // Convert DateTime to Apple's epoch (nanoseconds since 2001-01-01)
-            let apple_epoch =
-                start_dt.timestamp_nanos_opt().unwrap_or(0) / 1_000_000_000 - 978_307_200; // Offset from 2001-01-01 to 1970-01-01
+            let apple_epoch = start_dt.timestamp_nanos_opt().unwrap_or(0) - APPLE_EPOCH_OFFSET_NANOS;
             params.push(Box::new(apple_epoch));
         }
 
         if let Some(end_dt) = date_range.end {
             query.push_str(" AND date <= ?");
+            let apple_epoch = end_dt.timestamp_nanos_opt().unwrap_or(0) - APPLE_EPOCH_OFFSET_NANOS;
+            params.push(Box::new(apple_epoch));
             let apple_epoch =
                 end_dt.timestamp_nanos_opt().unwrap_or(0) / 1_000_000_000 - 978_307_200;
             params.push(Box::new(apple_epoch));
