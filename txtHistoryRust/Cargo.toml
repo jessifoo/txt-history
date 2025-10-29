@@ -47,7 +47,8 @@ unused_must_use = "deny"
 [lints.clippy]
 # Only enforce critical safety issues
 unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-dbg_macro = "deny"
+# The following lints are enforced via CI scripts to allow their use in tests
+# expect_used = "deny"
+# panic = "deny"
+# dbg_macro = "deny"
 unimplemented = "deny"
