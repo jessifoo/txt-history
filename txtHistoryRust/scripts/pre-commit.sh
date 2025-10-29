@@ -30,9 +30,10 @@ fi
 
 # === 2. Clippy Linting ===
 echo -e "\n🔧 Running Clippy lints..."
-if ! cargo clippy --all-targets --all-features -- -D warnings; then
-    echo -e "${RED}❌ Clippy found issues!${NC}"
-    echo -e "${YELLOW}Run: cargo clippy --all-targets --all-features --fix${NC}"
+# We only lint the library and binaries, not tests, which may use expect/unwrap.
+if ! cargo clippy --lib --bins --all-features -- -D warnings -D clippy::expect_used -D clippy::panic -D clippy::dbg_macro; then
+    echo -e "${RED}❌ Clippy found issues in library or binary code!${NC}"
+    echo -e "${YELLOW}Run: cargo clippy --lib --bins --all-features --fix${NC}"
     CHECKS_FAILED=1
 else
     echo -e "${GREEN}✅ Clippy checks passed!${NC}"
