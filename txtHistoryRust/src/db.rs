@@ -734,16 +734,32 @@ pub fn establish_connection() -> Result<Database> {
         } else if let Ok(home) = std::env::var("HOME") {
             #[cfg(target_os = "macos")]
             let subdir = "Library/Application Support";
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(all(unix, not(target_os = "macos")))]
             let subdir = ".local/share";
+            #[cfg(not(unix))]
+            let subdir = ""; // Fallback for non-unix if needed, though covered by windows below
 
             PathBuf::from(home).join(subdir)
+        } else if let Ok(appdata) = std::env::var("APPDATA") {
+            #[cfg(target_os = "windows")]
+            {
+                PathBuf::from(appdata)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                // Fallback to current directory if no home directory on non-windows
+                PathBuf::from(".")
+            }
         } else {
             // Fallback to current directory if no home directory
             PathBuf::from(".")
         };
 
         let db_path = data_dir.join("txt_history").join("messages.db");
+        // Ensure the directory exists before returning the path
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         format!("sqlite:{}", db_path.display())
     });
 
