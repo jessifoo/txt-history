@@ -758,7 +758,7 @@ pub fn establish_connection() -> Result<Database> {
         let db_path = data_dir.join("txt_history").join("messages.db");
         // Ensure the directory exists before returning the path
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            let _ = std::fs::create_dir_all(parent); // Ignore error in default path calculation
         }
         format!("sqlite:{}", db_path.display())
     });
