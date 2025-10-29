@@ -1,10 +1,6 @@
 use anyhow::Result;
 use chrono::Local;
-use txt_history_rust::{
-    db,
-    models::{DbMessage, NewMessage},
-    nlp::NlpProcessor,
-};
+use txt_history_rust::{db, models::NewMessage, nlp::NlpProcessor};
 
 fn main() -> Result<()> {
     // Initialize database
@@ -14,7 +10,7 @@ fn main() -> Result<()> {
     println!("Testing NLP processing functionality...");
 
     // Create a test processor
-    let processor = NlpProcessor::new("test_v1").expect("Failed to create NLP processor");
+    let processor = NlpProcessor::new("test_v1")?;
 
     // Create some test messages if they don't exist
     ensure_test_messages(&db)?;

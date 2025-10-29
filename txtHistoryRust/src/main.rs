@@ -5,20 +5,19 @@ mod repository;
 mod schema;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, NaiveDateTime};
+use chrono::{DateTime, Local};
 use clap::{Parser, Subcommand};
-use imessage_database::util::dirs;
 use repository::IMessageDatabaseRepo;
-use std::path::PathBuf;
+use serde::ser::SerializeSeq;
+use serde::Serializer;
 
 use crate::db::Database;
 use crate::models::{Contact, DateRange, OutputFormat};
 use crate::nlp::NlpProcessor;
 use crate::repository::MessageRepository;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use txt_history_rust::config::AppConfig;
-use txt_history_rust::logging::{init_logging, OperationTimer};
-use txt_history_rust::metrics::MetricsCollector;
+use txt_history_rust::logging::init_logging;
 use txt_history_rust::validation::InputValidator;
 
 #[derive(Parser)]
@@ -697,11 +696,11 @@ fn write_csv_file(messages: &[models::Message], file_path: &str) -> Result<()> {
     let mut writer = csv::Writer::from_writer(BufWriter::new(file));
 
     // Write header
-    writer.write_record(&["Sender", "Timestamp", "Content"])?;
+    writer.write_record(["Sender", "Timestamp", "Content"])?;
 
     // Write data
     for message in messages {
-        writer.write_record(&[
+        writer.write_record([
             &message.sender,
             &message.timestamp.format("%b %d, %Y %r").to_string(),
             &message.content,

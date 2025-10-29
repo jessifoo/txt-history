@@ -12,6 +12,7 @@ use crate::db::Database;
 use crate::models::{Contact, DateRange, Message, NewMessage, OutputFormat};
 
 /// Repository trait for interacting with message data
+#[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait MessageRepository {
     async fn fetch_messages(
@@ -50,6 +51,7 @@ impl Repository {
     }
 
     /// Export conversation with a specific person
+    #[allow(clippy::too_many_arguments)]
     pub async fn export_conversation_by_person(
         &self,
         person_name: &str,
@@ -352,7 +354,7 @@ impl MessageRepository for Repository {
     async fn export_conversation_by_person(
         &self,
         person_name: &str,
-        format: OutputFormat,
+        _format: OutputFormat,
         output_path: &Path,
         date_range: &DateRange,
         chunk_size: Option<f64>,
@@ -555,6 +557,7 @@ impl IMessageDatabaseRepo {
     }
 
     // Save messages to database
+    #[allow(dead_code)]
     async fn save_to_database(&self, messages: &[Message], contact: &Contact) -> Result<()> {
         // Ensure contact exists in database
         let db_contact = self

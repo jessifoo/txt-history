@@ -326,7 +326,7 @@ impl NlpProcessor {
         } else {
             let normalized: f32 = total_sentiment / word_count;
             // Clamp to [-1.0, 1.0] range
-            normalized.max(-1.0_f32).min(1.0_f32)
+            normalized.clamp(-1.0_f32, 1.0_f32)
         }
     }
 

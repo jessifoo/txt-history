@@ -91,6 +91,7 @@ impl MetricsCollector {
     }
 
     /// Record export operation metrics
+    #[allow(clippy::too_many_arguments)]
     pub fn record_export_operation(
         &mut self,
         format: &str,
