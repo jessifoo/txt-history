@@ -16,9 +16,8 @@ pub struct MetricsCollector {
 
 impl MetricsCollector {
     /// Initialize metrics collection
-    pub const fn init() -> Result<()> {
+    pub const fn init() {
         // Simple initialization - no external dependencies
-        Ok(())
     }
 
     /// Record database operation metrics
