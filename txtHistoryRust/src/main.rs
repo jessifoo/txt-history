@@ -256,6 +256,9 @@ async fn import_messages(
     } else {
         std::path::PathBuf::from(config.get_imessage_db_path())
     };
+    // Validate the resolved path early to avoid downstream failures
+    InputValidator::validate_imessage_db_path(&chat_db_path)
+        .with_context(|| format!("Invalid iMessage database path: {}", chat_db_path.display()))?;
 
     info!("Using iMessage database at: {}", chat_db_path.display());
 
