@@ -1,5 +1,5 @@
 -- Create processed_messages table
-CREATE TABLE processed_messages (
+CREATE TABLE IF NOT EXISTS processed_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     original_message_id INTEGER NOT NULL,
     processed_text TEXT NOT NULL,
@@ -14,6 +14,6 @@ CREATE TABLE processed_messages (
 );
 
 -- Create indexes for processed_messages table
-CREATE INDEX idx_processed_messages_original ON processed_messages(original_message_id);
-CREATE INDEX idx_processed_messages_sentiment ON processed_messages(sentiment_score);
-CREATE INDEX idx_processed_messages_version ON processed_messages(processing_version);
+CREATE INDEX IF NOT EXISTS idx_processed_messages_original ON processed_messages(original_message_id);
+CREATE INDEX IF NOT EXISTS idx_processed_messages_sentiment ON processed_messages(sentiment_score);
+CREATE INDEX IF NOT EXISTS idx_processed_messages_version ON processed_messages(processing_version);

@@ -3,6 +3,7 @@ use crate::repository::MessageRepository;
 use crate::cache::MessageCache;
 use anyhow::Result;
 use std::path::Path;
+use tracing::{info, debug};
 
 pub struct MessageService {
     repository: Box<dyn MessageRepository>,
@@ -26,11 +27,11 @@ impl MessageService {
     ) -> Result<()> {
         // Try to get messages from cache first
         let messages = if let Some(cached_messages) = self.cache.get_cached_messages(&contact, &date_range)? {
-            println!("Using cached messages for {} in date range", contact.name);
+            info!("Using cached messages for {} in date range", contact.name);
             cached_messages
         } else {
             // If not in cache, fetch from database
-            println!("Fetching messages for {} from database", contact.name);
+            info!("Fetching messages for {} from database", contact.name);
             let mut messages = self.repository.fetch_messages(&contact, &date_range).await?;
             messages.sort_by_key(|m| m.timestamp);
             

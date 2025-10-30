@@ -1,5 +1,5 @@
 -- Create messages table
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     imessage_id TEXT NOT NULL UNIQUE,
     text TEXT,
@@ -14,13 +14,13 @@ CREATE TABLE messages (
 );
 
 -- Create indexes for messages table
-CREATE INDEX idx_messages_date ON messages(date_created);
-CREATE INDEX idx_messages_sender ON messages(sender);
-CREATE INDEX idx_messages_handle ON messages(handle_id);
-CREATE INDEX idx_messages_imessage_id ON messages(imessage_id);
+CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date_created);
+CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender);
+CREATE INDEX IF NOT EXISTS idx_messages_handle ON messages(handle_id);
+CREATE INDEX IF NOT EXISTS idx_messages_imessage_id ON messages(imessage_id);
 
 -- Create contacts table
-CREATE TABLE contacts (
+CREATE TABLE IF NOT EXISTS contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     phone TEXT,
@@ -30,11 +30,11 @@ CREATE TABLE contacts (
 );
 
 -- Create indexes for contacts table
-CREATE INDEX idx_contacts_phone ON contacts(phone);
-CREATE INDEX idx_contacts_email ON contacts(email);
+CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
+CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email);
 
 -- Create attachments table
-CREATE TABLE attachments (
+CREATE TABLE IF NOT EXISTS attachments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL,
     filename TEXT,
@@ -45,4 +45,4 @@ CREATE TABLE attachments (
 );
 
 -- Create index for attachments table
-CREATE INDEX idx_attachments_message ON attachments(message_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
