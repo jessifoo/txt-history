@@ -1,10 +1,6 @@
 use anyhow::Result;
 use chrono::Local;
-use txt_history_rust::{
-    db,
-    models::{DbMessage, NewMessage},
-    nlp::NlpProcessor,
-};
+use txt_history_rust::{db, models::NewMessage, nlp::NlpProcessor};
 
 fn main() -> Result<()> {
     // Initialize database
@@ -14,7 +10,7 @@ fn main() -> Result<()> {
     println!("Testing NLP processing functionality...");
 
     // Create a test processor
-    let processor = NlpProcessor::new("test_v1").expect("Failed to create NLP processor");
+    let processor = NlpProcessor::new("test_v1")?;
 
     // Create some test messages if they don't exist
     ensure_test_messages(&db)?;
@@ -96,22 +92,46 @@ fn ensure_test_messages(db: &db::Database) -> Result<()> {
 
     // Sample test messages
     let test_messages = vec![
-        ("Jess", "I'm so happy with the progress we've made on this project!", true),
-        ("Phil", "I don't like how this feature is working. It's terrible.", false),
-        ("Robert", "Can you meet me at the coffee shop on Main Street at 3pm?", false),
-        ("Jess", "The weather is nice today, but I think it might rain tomorrow.", true),
+        (
+            "Jess",
+            "I'm so happy with the progress we've made on this project!",
+            true,
+        ),
+        (
+            "Phil",
+            "I don't like how this feature is working. It's terrible.",
+            false,
+        ),
+        (
+            "Robert",
+            "Can you meet me at the coffee shop on Main Street at 3pm?",
+            false,
+        ),
+        (
+            "Jess",
+            "The weather is nice today, but I think it might rain tomorrow.",
+            true,
+        ),
         (
             "Rhonda",
             "I just finished reading that book you recommended. It was amazing!",
             false,
         ),
-        ("Jess", "I'm having trouble with the code. Nothing is working right now.", true),
+        (
+            "Jess",
+            "I'm having trouble with the code. Nothing is working right now.",
+            true,
+        ),
         (
             "Phil",
             "Let's discuss this issue with John and Sarah from the marketing team.",
             false,
         ),
-        ("Jess", "https://example.com has some great resources on this topic! 😊", true),
+        (
+            "Jess",
+            "https://example.com has some great resources on this topic! 😊",
+            true,
+        ),
         (
             "Sherry",
             "The meeting is scheduled for Tuesday at 10am in Conference Room A.",

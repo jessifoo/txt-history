@@ -1,6 +1,6 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use config::{Config, Environment, File};
+use serde::{Deserialize, Serialize};
 
 /// Application configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,7 +88,7 @@ impl Default for AppConfig {
                 enable_compression: false,
             },
             imessage: IMessageConfig {
-                database_path: "".to_string(), // Will be dynamically detected
+                database_path: String::new(), // Will be dynamically detected
                 connection_timeout_secs: 30,
                 read_timeout_secs: 60,
                 max_retries: 3,
@@ -108,11 +108,11 @@ impl AppConfig {
             // Add environment variables with prefix
             .add_source(Environment::with_prefix("TXT_HISTORY").separator("_"))
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to load configuration: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to load configuration: {e}"))?;
 
-        let app_config: AppConfig = config
+        let app_config: Self = config
             .try_deserialize()
-            .map_err(|e| anyhow::anyhow!("Failed to deserialize configuration: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to deserialize configuration: {e}"))?;
 
         // Validate configuration
         app_config.validate()?;
@@ -127,25 +127,25 @@ impl AppConfig {
             return Err(anyhow::anyhow!("max_connections must be greater than 0"));
         }
         if self.database.connection_timeout_secs == 0 {
-            return Err(anyhow::anyhow!("connection_timeout_secs must be greater than 0"));
+            return Err(anyhow::anyhow!(
+                "connection_timeout_secs must be greater than 0"
+            ));
         }
 
         // Validate logging config
         let valid_levels = ["trace", "debug", "info", "warn", "error"];
         if !valid_levels.contains(&self.logging.level.as_str()) {
             return Err(anyhow::anyhow!(
-                "Invalid log level: {}. Must be one of: {:?}",
-                self.logging.level,
-                valid_levels
+                "Invalid log level: {}. Must be one of: {valid_levels:?}",
+                self.logging.level
             ));
         }
 
         let valid_formats = ["text", "json"];
         if !valid_formats.contains(&self.logging.format.as_str()) {
             return Err(anyhow::anyhow!(
-                "Invalid log format: {}. Must be one of: {:?}",
-                self.logging.format,
-                valid_formats
+                "Invalid log format: {}. Must be one of: {valid_formats:?}",
+                self.logging.format
             ));
         }
 
@@ -161,9 +161,8 @@ impl AppConfig {
         let valid_formats = ["txt", "csv", "json"];
         if !valid_formats.contains(&self.export.default_format.as_str()) {
             return Err(anyhow::anyhow!(
-                "Invalid export format: {}. Must be one of: {:?}",
-                self.export.default_format,
-                valid_formats
+                "Invalid export format: {}. Must be one of: {valid_formats:?}",
+                self.export.default_format
             ));
         }
 
@@ -172,7 +171,9 @@ impl AppConfig {
         }
 
         if self.export.max_lines_per_chunk == 0 {
-            return Err(anyhow::anyhow!("max_lines_per_chunk must be greater than 0"));
+            return Err(anyhow::anyhow!(
+                "max_lines_per_chunk must be greater than 0"
+            ));
         }
 
         // Validate iMessage config
@@ -184,32 +185,43 @@ impl AppConfig {
     }
 
     /// Get database URL from environment or config
+    #[must_use]
     pub fn get_database_url(&self) -> String {
-        std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| self.database.url.clone())
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| self.database.url.clone())
     }
 
     /// Get iMessage database path from environment or config
+    #[must_use]
     pub fn get_imessage_db_path(&self) -> String {
-        std::env::var("IMESSAGE_DB_PATH")
-            .unwrap_or_else(|_| {
-                if self.imessage.database_path.is_empty() {
-                    // Fallback to default macOS path
-                    format!("{}/Library/Messages/chat.db", 
-                        std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string()))
-                } else {
-                    self.imessage.database_path.clone()
+        std::env::var("IMESSAGE_DB_PATH").unwrap_or_else(|_| {
+            if self.imessage.database_path.is_empty() {
+                // Use platform-agnostic approach - only default to macOS path on macOS
+                #[cfg(target_os = "macos")]
+                {
+                    if let Ok(home) = std::env::var("HOME") {
+                        format!("{}/Library/Messages/chat.db", home)
+                    } else {
+                        // No default on macOS without HOME
+                        String::new()
+                    }
                 }
-            })
+                #[cfg(not(target_os = "macos"))]
+                {
+                    // No default iMessage path on non-macOS systems
+                    String::new()
+                }
+            } else {
+                self.imessage.database_path.clone()
+            }
+        })
     }
 
     /// Get log level from environment or config
+    #[must_use]
     pub fn get_log_level(&self) -> String {
-        std::env::var("RUST_LOG")
-            .unwrap_or_else(|_| self.logging.level.clone())
+        std::env::var("RUST_LOG").unwrap_or_else(|_| self.logging.level.clone())
     }
 }
-
 
 #[cfg(test)]
 mod tests {

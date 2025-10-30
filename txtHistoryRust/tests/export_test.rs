@@ -6,7 +6,9 @@ use tokio::runtime::Runtime;
 
 // Import the necessary modules from the crate
 use txt_history_rust::db::Database;
-use txt_history_rust::models::{Contact, DateRange, DbContact, DbMessage, Message, NewContact, NewMessage, OutputFormat};
+use txt_history_rust::models::{
+    Contact, DateRange, DbContact, DbMessage, Message, NewContact, NewMessage, OutputFormat,
+};
 use txt_history_rust::repository::{IMessageDatabaseRepo, MessageRepository};
 
 #[test]
@@ -40,13 +42,20 @@ fn test_export_conversation_by_person() {
         primary_identifier: Some("Jess".to_string()),
     };
 
-    let person = db.add_or_update_contact(person_contact).expect("Failed to add person contact");
-    let me = db.add_or_update_contact(me_contact).expect("Failed to add me contact");
+    let person = db
+        .add_or_update_contact(person_contact)
+        .expect("Failed to add person contact");
+    let me = db
+        .add_or_update_contact(me_contact)
+        .expect("Failed to add me contact");
 
     // Create test messages with realistic timestamps
-    let timestamp1 = NaiveDateTime::parse_from_str("2025-01-20 12:21:19", "%Y-%m-%d %H:%M:%S").unwrap();
-    let timestamp2 = NaiveDateTime::parse_from_str("2025-01-20 12:22:28", "%Y-%m-%d %H:%M:%S").unwrap();
-    let timestamp3 = NaiveDateTime::parse_from_str("2025-01-20 14:26:27", "%Y-%m-%d %H:%M:%S").unwrap();
+    let timestamp1 =
+        NaiveDateTime::parse_from_str("2025-01-20 12:21:19", "%Y-%m-%d %H:%M:%S").unwrap();
+    let timestamp2 =
+        NaiveDateTime::parse_from_str("2025-01-20 12:22:28", "%Y-%m-%d %H:%M:%S").unwrap();
+    let timestamp3 =
+        NaiveDateTime::parse_from_str("2025-01-20 14:26:27", "%Y-%m-%d %H:%M:%S").unwrap();
 
     // Message from Phil to Jess
     let message1 = NewMessage {
@@ -110,15 +119,31 @@ fn test_export_conversation_by_person() {
 
     #[async_trait::async_trait]
     impl MessageRepository for MockRepo {
-        async fn fetch_messages(&self, _contact: &Contact, _date_range: &DateRange) -> anyhow::Result<Vec<Message>> {
+        async fn fetch_messages(
+            &self,
+            _contact: &Contact,
+            _date_range: &DateRange,
+        ) -> anyhow::Result<Vec<Message>> {
             Ok(Vec::new())
         }
 
-        async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> anyhow::Result<()> {
+        async fn save_messages(
+            &self,
+            messages: &[Message],
+            format: OutputFormat,
+            path: &Path,
+        ) -> anyhow::Result<()> {
             // Simple implementation for testing
             let content = messages
                 .iter()
-                .map(|m| format!("{}, {}, {}", m.sender, m.timestamp.format("%b %d, %Y %I:%M:%S %p"), m.content))
+                .map(|m| {
+                    format!(
+                        "{}, {}, {}",
+                        m.sender,
+                        m.timestamp.format("%b %d, %Y %I:%M:%S %p"),
+                        m.content
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n\n");
 
@@ -133,8 +158,14 @@ fn test_export_conversation_by_person() {
         }
 
         async fn export_conversation_by_person(
-            &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
-            lines_per_chunk: Option<usize>, only_contact: bool,
+            &self,
+            person_name: &str,
+            format: OutputFormat,
+            output_path: &Path,
+            date_range: &DateRange,
+            chunk_size: Option<f64>,
+            lines_per_chunk: Option<usize>,
+            only_contact: bool,
         ) -> anyhow::Result<Vec<PathBuf>> {
             // Get all messages with this person
             let messages = self.db.get_conversation_with_person(
@@ -153,7 +184,11 @@ fn test_export_conversation_by_person() {
                 .map(|db_msg| Message {
                     content: db_msg.text.unwrap_or_default(),
                     sender: db_msg.sender,
-                    timestamp: chrono::DateTime::<chrono::Utc>::from_utc(db_msg.date_created, chrono::Utc).with_timezone(&chrono::Local),
+                    timestamp: chrono::DateTime::<chrono::Utc>::from_utc(
+                        db_msg.date_created,
+                        chrono::Utc,
+                    )
+                    .with_timezone(&chrono::Local),
                 })
                 .collect();
 
@@ -166,8 +201,10 @@ fn test_export_conversation_by_person() {
             let txt_path = output_path.with_extension("txt");
             let csv_path = output_path.with_extension("csv");
 
-            self.save_messages(&messages, OutputFormat::Txt, &txt_path).await?;
-            self.save_messages(&messages, OutputFormat::Csv, &csv_path).await?;
+            self.save_messages(&messages, OutputFormat::Txt, &txt_path)
+                .await?;
+            self.save_messages(&messages, OutputFormat::Csv, &csv_path)
+                .await?;
 
             Ok(vec![txt_path, csv_path])
         }
@@ -179,11 +216,22 @@ fn test_export_conversation_by_person() {
         fs::create_dir_all(&output_dir).expect("Failed to create output directory");
 
         let repo = MockRepo::new(db);
-        let date_range = DateRange { start: None, end: None };
+        let date_range = DateRange {
+            start: None,
+            end: None,
+        };
 
         let output_path = output_dir.join("phil_conversation");
         let result = repo
-            .export_conversation_by_person("Jess", OutputFormat::Txt, &output_path, &date_range, None, None, false)
+            .export_conversation_by_person(
+                "Jess",
+                OutputFormat::Txt,
+                &output_path,
+                &date_range,
+                None,
+                None,
+                false,
+            )
             .await
             .expect("Export failed");
 

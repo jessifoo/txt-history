@@ -26,7 +26,9 @@ fn test_add_or_update_contact() {
         primary_identifier: None,
     };
 
-    let contact = db.add_or_update_contact(new_contact).expect("Failed to add contact");
+    let contact = db
+        .add_or_update_contact(new_contact)
+        .expect("Failed to add contact");
 
     // Verify the contact was added correctly
     assert_eq!(contact.name, "Test Person");
@@ -42,7 +44,9 @@ fn test_add_or_update_contact() {
         primary_identifier: None,
     };
 
-    let updated = db.add_or_update_contact(updated_contact).expect("Failed to update contact");
+    let updated = db
+        .add_or_update_contact(updated_contact)
+        .expect("Failed to update contact");
 
     // Verify the contact was updated correctly
     assert_eq!(updated.id, contact.id); // Same ID means it's the same contact
@@ -77,13 +81,20 @@ fn test_get_conversation_with_person() {
         primary_identifier: Some("Jess".to_string()),
     };
 
-    let person = db.add_or_update_contact(person_contact).expect("Failed to add person contact");
-    let me = db.add_or_update_contact(me_contact).expect("Failed to add me contact");
+    let person = db
+        .add_or_update_contact(person_contact)
+        .expect("Failed to add person contact");
+    let me = db
+        .add_or_update_contact(me_contact)
+        .expect("Failed to add me contact");
 
     // Create test messages
-    let timestamp1 = NaiveDateTime::parse_from_str("2025-01-01 10:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
-    let timestamp2 = NaiveDateTime::parse_from_str("2025-01-01 10:05:00", "%Y-%m-%d %H:%M:%S").unwrap();
-    let timestamp3 = NaiveDateTime::parse_from_str("2025-01-01 10:10:00", "%Y-%m-%d %H:%M:%S").unwrap();
+    let timestamp1 =
+        NaiveDateTime::parse_from_str("2025-01-01 10:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+    let timestamp2 =
+        NaiveDateTime::parse_from_str("2025-01-01 10:05:00", "%Y-%m-%d %H:%M:%S").unwrap();
+    let timestamp3 =
+        NaiveDateTime::parse_from_str("2025-01-01 10:10:00", "%Y-%m-%d %H:%M:%S").unwrap();
 
     // Message from person to me
     let message1 = NewMessage {
@@ -152,6 +163,12 @@ fn test_get_conversation_with_person() {
 
     // Should only include messages from timestamp2 onwards
     assert_eq!(filtered_conversation.len(), 2);
-    assert_eq!(filtered_conversation[0].text, Some("Hello from me".to_string()));
-    assert_eq!(filtered_conversation[1].text, Some("How are you?".to_string()));
+    assert_eq!(
+        filtered_conversation[0].text,
+        Some("Hello from me".to_string())
+    );
+    assert_eq!(
+        filtered_conversation[1].text,
+        Some("How are you?".to_string())
+    );
 }
