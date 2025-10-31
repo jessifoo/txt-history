@@ -28,7 +28,8 @@ impl r2d2::ManageConnection for SqliteConnectionManager {
     }
 
     fn is_valid(&self, conn: &mut Connection) -> std::result::Result<(), rusqlite::Error> {
-        conn.execute_batch("").map_err(Into::into)
+        conn.execute("SELECT 1", [])?;
+        Ok(())
     }
 
     fn has_broken(&self, _conn: &mut Connection) -> bool {
