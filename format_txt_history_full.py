@@ -1,47 +1,59 @@
+"""Utilities for exporting and formatting iMessage history into chunked files."""
+
+from __future__ import annotations
+
 import argparse
 import asyncio
 import csv
 import logging
-import re
 import os
+import re
+import shutil
 import subprocess
 from datetime import datetime
-from logging import Logger
 from pathlib import Path
-from typing import List, Optional, Dict
-import sys
+from typing import Dict, Iterable, List, Optional, Sequence
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Regular expressions
-date_pattern = re.compile(r"^(\w{3} \d{2}, \d{4}\s*\d{1,2}:\d{2}:\d{2} \w{2})")
-read_receipt_pattern = re.compile(r"\(Read by.*$")
+MessageRow = List[str]
+
+DATE_PATTERN = re.compile(r"^(\w{3} \d{2}, \d{4}\s*\d{1,2}:\d{2}:\d{2} \w{2})")
+READ_RECEIPT_PATTERN = re.compile(r"\(Read by.*$")
+
+PHIL_EMAIL = "apple@phil-g.com"
+DEFAULT_CHUNK_SIZE_MB = 5.0
+DEFAULT_EXPORT_SUBDIR = "imessage_export"
+DEFAULT_IMESSAGE_EXPORTER_PATH = "/opt/homebrew/bin/imessage-exporter"
+
 
 def normalize_phone_number(phone_number: str) -> str:
-    """Normalize phone number to a consistent format.
+    """Normalize a phone number to a predictable E.164-like format."""
 
-    Args:
-        phone_number: The phone number to normalize
+    if not phone_number:
+        raise ValueError("Phone number cannot be empty.")
 
-    Returns:
-        str: Normalized phone number containing only digits and '+'
-    """
-    # Remove all characters except digits and +
-    normalized = re.sub(r"[^\d+]", "", phone_number)
+    if not re.search(r"\d", phone_number):
+        return phone_number.strip()
 
-    # Ensure + is only at the start if present
-    if "+" in normalized and not normalized.startswith("+"):
-        normalized = normalized.replace("+", "")
-        normalized = "+" + normalized
+    digits = re.sub(r"\D", "", phone_number)
+    if not digits:
+        raise ValueError(f"Invalid phone number: {phone_number}")
 
-    return normalized
+    if phone_number.strip().startswith("+"):
+        return f"+{digits}"
 
-# Map phone numbers to names
-phone_number_map: Dict[str, str] = {
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+
+    if len(digits) == 10:
+        return f"+1{digits}"
+
+    return f"+{digits}"
+
+
+PHONE_NUMBER_MAP: Dict[str, str] = {
     "Phil": normalize_phone_number("+18673335566"),
     "Robert": normalize_phone_number("+17806793467"),
     "Rhonda": normalize_phone_number("+17803944504"),
@@ -49,478 +61,353 @@ phone_number_map: Dict[str, str] = {
     "Jess": "Jess",
 }
 
-# New output directory within txt-history
 OUTPUT_DIR = Path(__file__).parent / "output"
 
 
+def _message_date_key(date_text: str) -> datetime:
+    """Convert a message date string into a comparable ``datetime`` object."""
+
+    normalized = re.sub(r"\s+", " ", date_text.strip())
+    for fmt in ("%b %d, %Y %I:%M:%S %p", "%b %d, %Y %H:%M:%S %p"):
+        try:
+            return datetime.strptime(normalized, fmt)
+        except ValueError:
+            continue
+    logger.debug("Falling back to epoch for unsupported date format: %s", date_text)
+    return datetime.fromtimestamp(0)
+
+
+def sort_messages_by_date(messages: Sequence[MessageRow]) -> List[MessageRow]:
+    """Return messages sorted chronologically by their date field."""
+
+    return sorted(messages, key=lambda row: _message_date_key(row[1]))
+
+
 async def run_imessage_exporter(
+    *,
     name: str,
-    date: Optional[str],
     phone_number: str,
     imessage_filter: str,
+    date: Optional[str] = None,
+    end_date: Optional[str] = None,
     export_path: Optional[Path] = None,
 ) -> None:
-    """Run the iMessage-exporter command asynchronously.
+    """Execute the iMessage exporter CLI with the provided filters."""
 
-    Args:
-        name: Contact name
-        date: Optional start date for export
-        phone_number: Phone number to export
-        imessage_filter: Filter string for iMessage export
-        export_path: Optional path to save exported files (for testing)
+    export_dir = export_path or (Path.home() / DEFAULT_EXPORT_SUBDIR)
+    export_dir.mkdir(parents=True, exist_ok=True)
 
-    Raises:
-        subprocess.CalledProcessError: If the iMessage-exporter command fails
-        FileNotFoundError: If the export produces no output
-        RuntimeError: If the export folder is empty after successful command execution
-    """
-    # Get imessage-exporter path from environment or use default
-    imessage_exporter_path = os.environ.get("IMESSAGE_EXPORTER_PATH", "/opt/homebrew/bin/imessage-exporter")
-    base_command = [imessage_exporter_path, "-f", "txt", "-c", "disabled", "-m", "Jess"]
+    exporter_path = os.environ.get("IMESSAGE_EXPORTER_PATH", DEFAULT_IMESSAGE_EXPORTER_PATH)
+    command: List[str] = [exporter_path, "-f", "txt", "-c", "disabled", "-m", "Jess"]
 
     if date:
-        base_command.extend(["-s", date])
+        command.extend(["-s", date])
+    if end_date:
+        command.extend(["-e", end_date])
 
-    if name == "Phil":
-        base_command.extend(["-t", imessage_filter])
-    else:
-        base_command.extend(["-t", phone_number])
+    command.extend(["-t", imessage_filter if name == "Phil" else phone_number])
 
     if export_path:
-        base_command.extend(["-o", str(export_path)])
+        command.extend(["-o", str(export_path)])
 
-    logger.info(f"Running iMessage export for {name} (phone: {phone_number})")
-    logger.info(f"Command: {' '.join(base_command)}")
+    logger.info("Running iMessage export for %s", name)
+    logger.debug("Command: %s", " ".join(command))
 
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *base_command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
 
-        if stdout:
-            logger.info(f"Command output: {stdout.decode().strip()}")
-        if stderr:
-            logger.warning(f"Command stderr: {stderr.decode().strip()}")
+    if stdout:
+        logger.info(stdout.decode().strip())
+    if stderr:
+        logger.warning(stderr.decode().strip())
 
-        if process.returncode != 0:
-            error_msg = f"iMessage-exporter failed with return code {process.returncode}: {stderr.decode().strip()}"
-            logger.error(error_msg)
-            raise subprocess.CalledProcessError(
-                process.returncode, base_command, stderr
-            )
+    if process.returncode:
+        msg = f"iMessage-exporter failed with code {process.returncode}"
+        raise subprocess.CalledProcessError(process.returncode, command, stderr)
 
-        export_check_path = export_path or (Path.home() / "imessage_export")
-        if not export_check_path.exists() or not any(export_check_path.iterdir()):
-            raise RuntimeError(f"Export folder is empty: {export_check_path}")
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"iMessage-exporter command failed: {e}")
-        raise
+    if not export_dir.exists() or not any(export_dir.iterdir()):
+        raise RuntimeError(f"Export folder is empty: {export_dir}")
 
 
 def clear_folder(folder_path: Path) -> None:
-    """Forcefully delete the specified folder and its contents.
-
-    Args:
-        folder_path: Path to the folder to be cleared
-
-    Raises:
-        subprocess.CalledProcessError: If folder deletion fails
-    """
+    """Remove all contents inside ``folder_path`` and recreate it."""
 
     if folder_path.exists():
-        try:
-            subprocess.run(["rm", "-rf", str(folder_path)], check=True)
-            logger.info(f"Cleared folder: {folder_path}")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to clear folder: {folder_path}, {e}")
-            raise
-    else:
-        logger.info(f"Folder does not exist: {folder_path}")
+        shutil.rmtree(folder_path)
+    folder_path.mkdir(parents=True, exist_ok=True)
 
 
-def detect_file(
-    folder_path: Path, phone_number: str, email: Optional[str] = None
-) -> Path:
-    """Detect and potentially combine message files from phone number and email.
+def _matching_files(folder_path: Path, identifier: str) -> List[Path]:
+    """Return any text exports whose stem contains the given identifier."""
 
-    Args:
-        folder_path: Path to the export folder
-        phone_number: Phone number to look for
-        email: Optional email address to look for
+    if not identifier:
+        return []
+    normalized = normalize_phone_number(identifier) if re.search(r"\d", identifier) else identifier
+    candidates = {identifier.strip(), normalized}
+    if normalized.startswith("+1"):
+        candidates.add(normalized[1:])
+    return [path for path in folder_path.glob("*.txt") if any(candidate in path.stem for candidate in candidates)]
 
-    Returns:
-        Path: Path to the message file (might be a combined file)
 
-    Raises:
-        FileNotFoundError: If no matching files are found
-    """
-    logger.info(f"Searching for messages with phone: {phone_number}, email: {email}")
+def _safe_identifier(identifier: str) -> str:
+    """Return a sanitized name suitable for filenames."""
 
-    # Check if folder exists first
+    return re.sub(r"[^A-Za-z0-9+]+", "_", identifier).strip("_") or "messages"
+
+
+def detect_file(folder_path: Path, phone_number: str, email: Optional[str] = None) -> Path:
+    """Return the best matching export file, combining phone and email when needed."""
+
     if not folder_path.exists():
-        error_msg = f"Export folder does not exist: {folder_path}"
-        logger.error(error_msg)
-        raise FileNotFoundError(error_msg)
+        raise FileNotFoundError(f"Export folder does not exist: {folder_path}")
 
-    # Initialize file paths
-    phone_file = folder_path / f"{phone_number}.txt" if phone_number else None
-    email_file = folder_path / f"{email}.txt" if email else None
+    phone_files = _matching_files(folder_path, phone_number)
+    email_files: List[Path] = []
+    if email:
+        email_files = _matching_files(folder_path, email)
 
-    # Track which files exist
-    phone_exists = phone_file.exists() if phone_file else False
-    email_exists = email_file.exists() if email_file else False
+    phone_files = _matching_files(folder_path, phone_number)
+    email_files: List[Path] = []
+    if email:
+        email_files = _matching_files(folder_path, email)
 
-    # Return the file that exists; prioritize phone file over email file if both exist
-    if phone_exists:
-        return phone_file
-    elif email_exists:
-        return email_file
-    else:
-        error_msg = "No matching message files found"
-        logger.error(error_msg)
-        raise FileNotFoundError(error_msg)
+    if len(phone_files) > 1:
+        raise RuntimeError(f"Multiple phone files matched for {phone_number}: {phone_files}")
+    if len(email_files) > 1:
+        raise RuntimeError(f"Multiple email files matched for {email}: {email_files}")
+
+    if phone_files and email_files:
+        safe_name = _safe_identifier(phone_number or email or "combined")
+        combined_path = folder_path / f"combined_{safe_name}.txt"
+        combined_contents = []
+        for file_path in phone_files + email_files:
+            text = file_path.read_text(encoding="utf-8").rstrip()
+            if text:
+                combined_contents.append(text)
+        combined_text = "\n\n".join(combined_contents)
+        if combined_text:
+            combined_text += "\n\n"
+        combined_path.write_text(combined_text, encoding="utf-8")
+        return combined_path
+
+    if phone_files:
+        return phone_files[0]
+    if email_files:
+        return email_files[0]
+
+    raise FileNotFoundError("No matching message files found")
 
 
-def parse_messages(input_file: Path, name: str = "Phil") -> List[List[str]]:
-    """Parse iMessage export text file into structured format.
-
-    Args:
-        input_file: Path to the input file
-        name: Name of the contact to map phone number for (default: Phil)
-
-    Returns:
-        List of [sender, date, message] lists
-    """
-    parsed_messages = []
-    date, sender, message = "", "", []
-    phil_email = "apple@phil-g.com"  # Phil's email address
-
+def parse_messages(input_file: Path, name: str = "Phil") -> List[MessageRow]:
     if not input_file.exists():
         raise FileNotFoundError(f"Input file does not exist: {input_file}")
     if not input_file.is_file():
-        raise ValueError(f"Input file is not a regular file: {input_file}")
+        raise ValueError(f"Input path is not a file: {input_file}")
 
-    try:
-        with open(input_file, "r", encoding="utf-8") as infile:
-            lines = infile.readlines()
-    except IOError as e:
-        raise RuntimeError(f"Failed to read input file: {input_file}, {e}")
-
+    lines = input_file.read_text(encoding="utf-8").splitlines()
     if not lines:
         raise RuntimeError(f"Input file is empty: {input_file}")
 
-    for line in lines:
-        try:
-            # Remove read receipt and strip whitespace
-            line = re.sub(read_receipt_pattern, "", line).strip()
-            
-            # Skip empty lines
-            if not line:
-                continue
-                
-            # If this is a date line, store previous message and start new one
-            if date_pattern.match(line):
-                if date and sender and message:  # Only append if we have a complete message
-                    parsed_messages.append([sender, date, " ".join(message)])
-                date = line
-                sender = None  # Reset sender for next message
-                message = []
-            # If we have a date but no sender yet, this line is the sender
-            elif date and not sender:
-                # If it's a phone number, check against all mapped numbers
-                if re.match(r"^\+?\d+$", line):
-                    normalized_line = normalize_phone_number(line)
-                    # First check if it matches the requested contact's number
-                    if normalized_line == phone_number_map.get(name):
-                        sender = name
-                    else:
-                        # Check other mapped numbers
-                        sender = next(
-                            (n for n, number in phone_number_map.items() if number == normalized_line),
-                            line  # Keep original if no match
-                        )
-                # If it's Phil's email and name is Phil
-                elif line == phil_email and name == "Phil":
-                    sender = "Phil"
-                # If it's Jess
-                elif line == "Jess":
-                    sender = "Jess"
-                # Otherwise keep the original sender
+    messages: List[MessageRow] = []
+    current_date: Optional[str] = None
+    current_sender: Optional[str] = None
+    buffer: List[str] = []
+
+    for raw_line in lines:
+        line = READ_RECEIPT_PATTERN.sub("", raw_line).strip()
+        if not line:
+            continue
+
+        if DATE_PATTERN.match(line):
+            if current_date and current_sender and buffer:
+                messages.append([current_sender, current_date, " ".join(buffer)])
+            current_date = line
+            current_sender = None
+            buffer = []
+            continue
+
+        if current_date and current_sender is None:
+            if re.match(r"^\+?\d+$", line):
+                normalized = normalize_phone_number(line)
+                if normalized == PHONE_NUMBER_MAP.get(name):
+                    current_sender = name
                 else:
-                    sender = line
-            # If we have both date and sender, this is part of the message
-            elif date and sender:
-                message.append(line)
-        except Exception as e:
-            raise RuntimeError(f"Failed to parse line: {line}, {e}")
+                    current_sender = next(
+                        (label for label, number in PHONE_NUMBER_MAP.items() if number == normalized),
+                        line,
+                    )
+            elif line == PHIL_EMAIL and name == "Phil":
+                current_sender = "Phil"
+            elif line == "Jess":
+                current_sender = "Jess"
+            else:
+                current_sender = line
+            continue
 
-    # Don't forget the last message
-    if sender and date and message:
-        parsed_messages.append([sender, date, " ".join(message)])
+        if current_date and current_sender:
+            buffer.append(line)
 
-    return parsed_messages
+    if current_date and current_sender and buffer:
+        messages.append([current_sender, current_date, " ".join(buffer)])
+
+    return messages
 
 
-def estimate_rows_per_chunk(input_csv_path: Path, max_file_size_mb: float = 5) -> int:
-    """Estimate the maximum rows that can fit in a file given a size limit.
+def combine_message_files(files: Iterable[Path], name: str) -> List[MessageRow]:
+    all_messages: List[MessageRow] = []
+    for file_path in files:
+        all_messages.extend(parse_messages(file_path, name))
+    return sort_messages_by_date(all_messages)
 
-    Args:
-        input_csv_path: Path to the input CSV file
-        max_file_size_mb: Maximum file size in MB (default: 5)
 
-    Returns:
-        int: Estimated rows per chunk
-    """
-    max_file_size_bytes = max_file_size_mb * 1024 * 1024
-    total_rows = (
-        sum(1 for _ in open(input_csv_path, "r", encoding="utf-8")) - 1
-    )  # Subtract header
-    file_size = input_csv_path.stat().st_size
-    bytes_per_row = file_size / total_rows
-    return max(1, int(max_file_size_bytes / bytes_per_row))
+def estimate_rows_per_chunk(input_csv_path: Path, max_file_size_mb: float = DEFAULT_CHUNK_SIZE_MB) -> int:
+    if max_file_size_mb <= 0:
+        raise ValueError("max_file_size_mb must be positive")
+
+    with open(input_csv_path, "r", encoding="utf-8") as handle:
+        rows = max(sum(1 for _ in handle) - 1, 1)
+
+    file_size = max(input_csv_path.stat().st_size, 1)
+    bytes_per_row = file_size / rows
+    target_bytes = max_file_size_mb * 1024 * 1024
+    return max(1, int(target_bytes / max(bytes_per_row, 1)))
 
 
 def generate_output_directory(base_dir: Path) -> Path:
-    """Generate a timestamped directory for output.
+    """Create and return a timestamped output directory under ``base_dir``."""
 
-    Args:
-        base_dir: Base directory for output
-
-    Returns:
-        Path: Path to the generated output directory
-    """
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     output_dir = base_dir / f"chunks_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
 
-def chunk_messages(messages: List[List[str]], base_output_folder: Path, size_mb: float) -> Path:
-    """Split messages into chunks and write them to CSV and TXT files.
-    Each chunk will be capped at a size determined by size_mb.
+def chunk_messages(messages: Sequence[MessageRow], base_output_folder: Path, size_mb: float) -> Path:
+    """Write messages into CSV/TXT chunk pairs bounded by ``size_mb`` megabytes."""
 
-    Args:
-        messages: List of [sender, date, message] lists to chunk
-        base_output_folder: Base directory to create output folders in
-        size_mb: Maximum size in MB for each chunk
+    if not messages:
+        raise ValueError("No messages to chunk")
+    if size_mb <= 0:
+        raise ValueError("size_mb must be positive")
 
-    Returns:
-        Path to the output directory containing the chunks
+    output_dir = generate_output_directory(base_output_folder)
+    csv_dir = output_dir / "_chunks_csv"
+    txt_dir = output_dir / "_chunks_txt"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    txt_dir.mkdir(parents=True, exist_ok=True)
 
-    Raises:
-        OSError: If there are issues creating directories or writing files
-        ValueError: If the input parameters are invalid
-    """
-    try:
-        if not messages:
-            raise ValueError("No messages to chunk")
-        if size_mb <= 0:
-            raise ValueError(f"Invalid chunk size: {size_mb}MB")
+    all_messages_csv = csv_dir / "all_messages.csv"
+    with open(all_messages_csv, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Sender", "Date", "Message"])
+        writer.writerows(messages)
 
-        # Create output directories
-        output_dir = generate_output_directory(base_output_folder)
-        chunks_dir_csv = output_dir / "_chunks_csv"
-        chunks_dir_txt = output_dir / "_chunks_txt"
-        chunks_dir_csv.mkdir(parents=True, exist_ok=True)
-        chunks_dir_txt.mkdir(parents=True, exist_ok=True)
+    rows_per_chunk = estimate_rows_per_chunk(all_messages_csv, size_mb)
+    logger.info("Using %s rows per chunk", rows_per_chunk)
 
-        # Write all messages to a single CSV first
-        all_messages_csv = chunks_dir_csv / "all_messages.csv"
-        with open(all_messages_csv, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Sender", "Date", "Message"])
-            writer.writerows(messages)
+    chunk: List[MessageRow] = []
+    chunk_index = 1
 
-        # Calculate rows per chunk based on total file size
-        rows_per_chunk = estimate_rows_per_chunk(all_messages_csv, size_mb)
-        logger.info(f"Using {rows_per_chunk} rows per chunk based on {size_mb}MB size limit")
+    with open(all_messages_csv, "r", newline="", encoding="utf-8") as file:
+        reader = csv.reader(file)
+        next(reader, None)
+        for current_index, row in enumerate(reader, start=1):
+            chunk.append(row)
+            if current_index % rows_per_chunk == 0:
+                _flush_chunk(chunk, chunk_index, csv_dir, txt_dir)
+                chunk_index += 1
+                chunk = []
 
-        # Read and split into chunks
-        chunk = []
-        chunk_num = 1
+    if chunk:
+        _flush_chunk(chunk, chunk_index, csv_dir, txt_dir)
 
-        with open(all_messages_csv, "r", newline="", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-
-            for i, row in enumerate(reader, 1):
-                chunk.append(row)
-
-                if i % rows_per_chunk == 0:
-                    # Write CSV chunk
-                    chunk_csv = chunks_dir_csv / f"chunk_{chunk_num}.csv"
-                    with open(chunk_csv, "w", newline="", encoding="utf-8") as f:
-                        writer = csv.writer(f)
-                        writer.writerow(["Sender", "Date", "Message"])
-                        writer.writerows(chunk)
-
-                    # Write TXT chunk
-                    chunk_txt = chunks_dir_txt / f"chunk_{chunk_num}.txt"
-                    write_chunk_to_txt(chunk, chunk_txt)
-
-                    chunk = []
-                    chunk_num += 1
-
-        # Write any remaining rows
-        if chunk:
-            chunk_csv = chunks_dir_csv / f"chunk_{chunk_num}.csv"
-            with open(chunk_csv, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Sender", "Date", "Message"])
-                writer.writerows(chunk)
-
-            chunk_txt = chunks_dir_txt / f"chunk_{chunk_num}.txt"
-            write_chunk_to_txt(chunk, chunk_txt)
-
-        # Clean up all messages file
-        all_messages_csv.unlink()
-
-        return output_dir
-
-    except OSError as e:
-        logger.error(f"Failed to chunk messages: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error while chunking messages: {e}")
-        raise
+    all_messages_csv.unlink(missing_ok=True)
+    return output_dir
 
 
-def write_chunk_to_txt(messages: List[List[str]], txt_file: Path) -> None:
-    """Write a chunk of messages to a TXT file.
-    
-    Args:
-        messages: List of messages, each containing [sender, date, message]
-        txt_file: Output TXT file path
-    """
-    try:
-        with open(txt_file, "w", encoding="utf-8", newline="") as f:
-            for sender, date, message in messages:
-                f.write(f"{sender}, {date}, {message}\n\n")
-    except Exception as e:
-        logger.error(f"Failed to write chunk to TXT: {e}")
-        raise
+def _flush_chunk(chunk: List[MessageRow], chunk_index: int, csv_dir: Path, txt_dir: Path) -> None:
+    """Persist a single chunk to disk in both CSV and TXT formats."""
+
+    csv_path = csv_dir / f"chunk_{chunk_index}.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Sender", "Date", "Message"])
+        writer.writerows(chunk)
+
+    txt_path = txt_dir / f"chunk_{chunk_index}.txt"
+    write_chunk_to_txt(chunk, txt_path)
+
+
+def write_chunk_to_txt(messages: Sequence[MessageRow], txt_file: Path) -> None:
+    """Write ``messages`` to ``txt_file`` separated by blank lines."""
+
+    with open(txt_file, "w", encoding="utf-8", newline="") as handle:
+        for sender, date, message in messages:
+            handle.write(f"{sender}, {date}, {message}\n\n")
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    """Construct and return the CLI argument parser for the script."""
+
+    parser = argparse.ArgumentParser(description="Process iMessage export and format into chunked CSV/TXT outputs.")
+    parser.add_argument("-d", "--date", help="Start date for export (YYYY-MM-DD)")
+    parser.add_argument("-e", "--end-date", help="End date for export (YYYY-MM-DD)")
+    parser.add_argument("-m", "--name", help="Contact name (default: Phil)")
+    parser.add_argument("-s", "--size", type=float, help="Chunk size in MB (default: 5)")
+    parser.add_argument("-r", "--rows", type=int, help="Limit output to the most recent N messages")
+    return parser
 
 
 async def main() -> None:
-    """Main function to process iMessage exports."""
-    parser = argparse.ArgumentParser(
-        description="Process iMessage export and format into CSV."
-    )
-    parser.add_argument(
-        "-d",
-        "--date",
-        required=False,
-        help="Start date for iMessage export YYYY-MM-DD.",
-    )
-    parser.add_argument(
-        "-m", "--name", required=False, help="Name of the contact (default: Phil)."
-    )
-    parser.add_argument(
-        "-s",
-        "--size",
-        type=float,
-        default=None,
-        required=False,
-        help="Target size of chunks in MB.",
-    )
+    """Command-line entry point for exporting, parsing, and chunking iMessages."""
+
+    parser = build_argument_parser()
     args = parser.parse_args()
 
-    try:
-        # Default name and phone number
-        default_name = "Phil"
-        default_phone_number = phone_number_map.get(default_name)
-        phil_email = "apple@phil-g.com"  # Store Phil's email separately
+    name = args.name or "Phil"
+    phone_number = PHONE_NUMBER_MAP.get(name)
+    if not phone_number:
+        raise ValueError(f"Invalid name '{name}'. Choose from {sorted(PHONE_NUMBER_MAP)}")
 
-        # For Phil, we'll use both phone and email as identifiers
-        if default_name == "Phil":
-            imessage_filter = f"{default_phone_number},{phil_email}"
-        else:
-            imessage_filter = default_phone_number
+    if args.rows is not None and args.rows <= 0:
+        raise ValueError("--rows must be a positive integer")
+    if args.size is not None and args.size <= 0:
+        raise ValueError("--size must be positive")
 
-        logger.info(f"Using filter: {imessage_filter}")
+    filter_parts = [phone_number]
+    if name == "Phil":
+        filter_parts.append(PHIL_EMAIL)
+    imessage_filter = ",".join(filter_parts)
 
-        # Get the specified name or default to Phil
-        name = args.name or default_name
-        phone_number = phone_number_map.get(name) or default_phone_number
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    export_dir = Path.home() / DEFAULT_EXPORT_SUBDIR
+    if export_dir.exists():
+        clear_folder(export_dir)
+    else:
+        export_dir.mkdir(parents=True, exist_ok=True)
+    await run_imessage_exporter(
+        name=name,
+        phone_number=phone_number,
+        imessage_filter=imessage_filter,
+        date=args.date,
+        end_date=args.end_date,
+        export_path=export_dir,
+    )
 
-        if not phone_number:
-            raise ValueError(
-                f"Invalid name '{name}'. Must be one of {list(phone_number_map.keys())}."
-            )
+    message_file = detect_file(export_dir, phone_number, PHIL_EMAIL if name == "Phil" else None)
+    messages = parse_messages(message_file, name)
+    sorted_messages = sort_messages_by_date(messages)
 
-        # Create output directory if it doesn't exist
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created output directory: {OUTPUT_DIR}")
+    if args.rows:
+        sorted_messages = sorted_messages[-args.rows :]
 
-        # Clear and recreate the export folder
-        export_path = Path.home() / "imessage_export"
-        logger.info(f"clear folder path: {export_path}")
-        clear_folder(export_path)
-
-        # Run the iMessage-exporter
-        await run_imessage_exporter(name, args.date, phone_number, imessage_filter, export_path)
-
-        # Get message files
-        message_files = []
-        
-        # Get phone number file if it exists
-        try:
-            phone_file = detect_file(export_path, phone_number)
-            if phone_file.exists():
-                message_files.append(phone_file)
-        except FileNotFoundError:
-            logger.warning(f"No phone messages found for {name}")
-
-        # For Phil, also get email file
-        if name == "Phil":
-            try:
-                email_file = detect_file(export_path, phil_email)
-                if email_file.exists():
-                    message_files.append(email_file)
-            except FileNotFoundError:
-                logger.warning("No email messages found for Phil")
-
-        if not message_files:
-            raise RuntimeError(
-                f"No message files found for {name}. This could mean either:\n"
-                "1. There are no messages for this contact\n"
-                "2. The identifiers (phone/email) are incorrect\n"
-                "3. The messages are not in iMessage format"
-            )
-
-        # Parse messages
-        parsed_messages = []
-        for file in message_files:
-            parsed_messages.append(parse_messages(file, name))
-
-        # If we found multiple files, combine the parsed messages
-        if len(parsed_messages) > 1:
-            # Flatten the list of lists
-            all_messages = []
-            for messages in parsed_messages:
-                all_messages.extend(messages)
-            # Sort by date
-            all_messages.sort(key=lambda x: datetime.strptime(x[1], "%b %d, %Y %I:%M:%S %p"))
-        else:
-            all_messages = parsed_messages[0]
-
-        # Create chunks and write to both formats
-        output_dir = chunk_messages(all_messages, OUTPUT_DIR, args.size or 5)
-        logger.info(f"Processing completed. Chunks saved in: {output_dir}")
-
-    except FileNotFoundError as e:
-        logger.error("Failed to find exported message file")
-        logger.error(str(e))
-        raise RuntimeError(
-            "No messages were found. This could mean either:\n"
-            "1. There are no messages for this contact\n"
-            "2. The identifiers (phone/email) are incorrect\n"
-            "3. The messages are not in iMessage format"
-        ) from e
+    size_mb = args.size or DEFAULT_CHUNK_SIZE_MB
+    output_dir = chunk_messages(sorted_messages, OUTPUT_DIR, size_mb)
+    logger.info("Processing completed. Chunks saved in: %s", output_dir)
 
 
 if __name__ == "__main__":
