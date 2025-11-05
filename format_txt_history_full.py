@@ -170,6 +170,16 @@ def detect_file(folder_path: Path, phone_number: str, email: Optional[str] = Non
     if email:
         email_files = _matching_files(folder_path, email)
 
+    phone_files = _matching_files(folder_path, phone_number)
+    email_files: List[Path] = []
+    if email:
+        email_files = _matching_files(folder_path, email)
+
+    if len(phone_files) > 1:
+        raise RuntimeError(f"Multiple phone files matched for {phone_number}: {phone_files}")
+    if len(email_files) > 1:
+        raise RuntimeError(f"Multiple email files matched for {email}: {email_files}")
+
     if phone_files and email_files:
         safe_name = _safe_identifier(phone_number or email or "combined")
         combined_path = folder_path / f"combined_{safe_name}.txt"
