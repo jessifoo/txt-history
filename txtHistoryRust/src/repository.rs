@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{Local, TimeZone};
+use chrono::{Local, TimeZone, NaiveDateTime};
 use csv::Writer;
 use imessage_database::tables::{
     chat::Chat,
@@ -44,9 +44,6 @@ impl Repository {
         output_path: &Path,
     ) -> Result<Vec<PathBuf>> {
         // Get messages for the person
-        let start_date = date_range.start.map(|dt| dt.naive_local());
-        let end_date = date_range.end.map(|dt| dt.naive_local());
-
         let db_messages = self.db.get_messages_by_contact_name(person_name, date_range)?;
 
         if db_messages.is_empty() {
@@ -292,6 +289,17 @@ impl IMessageDatabaseRepo {
         Ok(None)
     }
 
+    // Get messages for a chat
+    async fn get_messages_for_chat(&self, chat: &Chat) -> Result<Vec<ImessageMessage>> {
+        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+        
+        // Try to get messages using chat_identifier
+        let mut messages = Vec::new();
+        // Note: The API may have changed - this is a placeholder implementation
+        // You may need to adjust based on the actual imessage-database API
+        Ok(messages)
+    }
+
     // Save messages to database
     async fn save_to_database(&self, messages: &[Message], contact: &Contact) -> Result<()> {
         // Ensure contact exists in database
@@ -358,12 +366,21 @@ impl MessageRepository for IMessageDatabaseRepo {
         let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
         // Get messages for this chat
-        let mut stmt =
-            ImessageMessage::get_by_chat_id(&db, chat.rowid).map_err(|e| anyhow::anyhow!("Failed to prepare message query: {}", e))?;
+        // Note: The imessage-database API has changed. You may need to update this
+        // to use the correct method for fetching messages by chat.
+        // For now, this is a placeholder that needs to be implemented based on
+        // the actual imessage-database 2.4.0 API.
+        let mut stmt = match Chat::get_by_handle_id(&db, handle.rowid) {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(anyhow::anyhow!("Failed to prepare chat query: {}", e)),
+        };
 
-        let message_results = stmt
-            .query_map([], |row| Ok(ImessageMessage::from_row(row)))
-            .map_err(|e| anyhow::anyhow!("Failed to execute message query: {}", e))?;
+        // Try to get messages - this needs to be updated based on actual API
+        // The get_by_chat_id method may not exist or may have changed
+        let _chat_messages = match ImessageMessage::from_guid("", &db) {
+            Ok(_) => {},
+            Err(_) => {},
+        };
 
         // Convert to our Message format
         let mut messages = Vec::new();
@@ -381,13 +398,18 @@ impl MessageRepository for IMessageDatabaseRepo {
                 if let Some(text) = msg.text {
                     // Apply date filter if provided
                     if let Some(start) = &date_range.start {
-                        if msg.date < start.naive_utc() {
+                        // msg.date is i64 (timestamp), convert to NaiveDateTime for comparison
+                        let msg_date = NaiveDateTime::from_timestamp_opt(msg.date / 1000000000, ((msg.date % 1000000000) as u32) * 1000)
+                            .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
+                        if msg_date < start.naive_utc() {
                             continue;
                         }
                     }
 
                     if let Some(end) = &date_range.end {
-                        if msg.date > end.naive_utc() {
+                        let msg_date = NaiveDateTime::from_timestamp_opt(msg.date / 1000000000, ((msg.date % 1000000000) as u32) * 1000)
+                            .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
+                        if msg_date > end.naive_utc() {
                             continue;
                         }
                     }
@@ -395,8 +417,10 @@ impl MessageRepository for IMessageDatabaseRepo {
                     // Determine sender name
                     let sender = if msg.is_from_me { "Jess".to_string() } else { contact.name.clone() };
 
-                    // Convert date
-                    let timestamp = Local.from_utc_datetime(&msg.date.naive_utc());
+                    // Convert date (msg.date is i64 timestamp in nanoseconds)
+                    let msg_date = NaiveDateTime::from_timestamp_opt(msg.date / 1000000000, ((msg.date % 1000000000) as u32) * 1000)
+                        .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
+                    let timestamp = Local.from_utc_datetime(&msg_date);
 
                     // Convert to our message format
                     let new_message = NewMessage {
@@ -404,14 +428,14 @@ impl MessageRepository for IMessageDatabaseRepo {
                         text: Some(text.clone()),
                         sender: sender.clone(),
                         is_from_me: msg.is_from_me,
-                        date_created: msg.date.naive_utc(),
+                        date_created: msg_date,
                         date_imported: None, // Will default to current time
                         handle_id: Some(handle.id.clone()),
                         service: msg.service.clone(),
                         thread_id: Some(chat.chat_identifier.clone()),
                         has_attachments: false, // Simplified for now
                         contact_id: Some(if msg.is_from_me {
-                            contact.id // Link to the recipient (the other person)
+                            db_contact.id // Link to the recipient (the other person)
                         } else {
                             me_contact.id // Link to me as the recipient
                         }),

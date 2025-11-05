@@ -1,7 +1,7 @@
 [package]
 name = "txt-history-rust"
 version = "0.1.0"  # Consider if you want to increment the version after these updates
-edition = "2021"
+edition = "2024"
 authors = ["Jessica Johnson"]
 description = "A Rust implementation of the txt-history message processor using imessage_database"
 

@@ -199,7 +199,6 @@ impl NlpProcessor {
     /// Process a batch of messages and store results in the database
     pub fn process_messages(&self, db: &Database, message_ids: &[i32]) -> Result<Vec<DbProcessedMessage>> {
         let mut processed_messages = Vec::new();
-        let conn = &mut db.get_connection()?;
 
         for &message_id in message_ids {
             // Check if message has already been processed with this version
