@@ -375,11 +375,10 @@ async def main() -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     export_dir = Path.home() / DEFAULT_EXPORT_SUBDIR
-    if not export_dir.exists() or not any(export_dir.iterdir()):
+    if export_dir.exists():
         clear_folder(export_dir)
     else:
         export_dir.mkdir(parents=True, exist_ok=True)
-
     await run_imessage_exporter(
         name=name,
         phone_number=phone_number,
