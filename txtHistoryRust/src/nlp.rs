@@ -8,7 +8,7 @@ use unicode_normalization::UnicodeNormalization;
 use whatlang::{Lang, detect};
 
 use crate::db::Database;
-use crate::models::{DbMessage, DbProcessedMessage, NamedEntity, NewProcessedMessage, NlpAnalysis};
+use crate::models::{DbProcessedMessage, NamedEntity, NewProcessedMessage, NlpAnalysis};
 
 /// NLP processor for text analysis
 pub struct NlpProcessor {

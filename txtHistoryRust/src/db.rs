@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, Context};
 use chrono::{NaiveDateTime, Utc};
 use r2d2::Pool;
 use rusqlite::{Connection, Row, params, OptionalExtension};
@@ -41,6 +41,7 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 pub type DbConnection = r2d2::PooledConnection<SqliteConnectionManager>;
 
 /// Database manager for handling connections and operations
+#[derive(Clone)]
 pub struct Database {
     pool: DbPool,
 }

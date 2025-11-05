@@ -128,7 +128,7 @@ fn ensure_test_messages(db: &db::Database) -> Result<()> {
     for (sender, text, is_from_me) in test_messages {
         let now = Local::now().naive_local();
         let new_message = NewMessage {
-            imessage_id: format!("test_{}", rand::random::<u64>()),
+            imessage_id: format!("test_{}", chrono::Utc::now().timestamp()),
             text: Some(text.to_string()),
             sender: sender.to_string(),
             is_from_me,

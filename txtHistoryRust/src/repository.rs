@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{Local, TimeZone, NaiveDateTime};
+use chrono::{Local, NaiveDateTime, DateTime};
 use csv::Writer;
 use imessage_database::tables::{
     chat::Chat,
@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use crate::{db::Database, models::NewMessage, Message};
+use crate::{db::Database, models::{NewMessage, Message}};
 use crate::models::{Contact, DateRange, OutputFormat};
 
 /// Repository trait for interacting with message data
@@ -229,35 +229,35 @@ impl IMessageDatabaseRepo {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
-        // Try to find by phone first
+        // Try to find by phone first using SQL query
         if let Some(phone) = &contact.phone {
-            let mut stmt = Handle::get_by_id(&db, phone).map_err(|e| anyhow::anyhow!("Failed to prepare handle query: {}", e))?;
+            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?1 OR id = ?2")?;
+            let handle_results = stmt.query_map(
+                rusqlite::params![phone, format!("+{}", phone.trim_start_matches('+'))],
+                |row| Ok(Handle::from_row(row))
+            )?;
 
-            let handle = stmt
-                .query_map([], |row| Ok(Handle::from_row(row)))
-                .map_err(|e| anyhow::anyhow!("Failed to execute handle query: {}", e))?
-                .next();
-
-            if let Some(Ok(handle)) = handle {
-                return Ok(Some(
-                    Handle::extract(handle).map_err(|e| anyhow::anyhow!("Failed to extract handle: {}", e))?,
-                ));
+            for handle_result in handle_results {
+                if let Ok(handle) = handle_result {
+                    let extracted = Handle::extract(Ok(handle)).map_err(|e| anyhow::anyhow!("Failed to extract handle: {}", e))?;
+                    return Ok(Some(extracted));
+                }
             }
         }
 
         // Then try by email
         if let Some(email) = &contact.email {
-            let mut stmt = Handle::get_by_id(&db, email).map_err(|e| anyhow::anyhow!("Failed to prepare handle query: {}", e))?;
+            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?")?;
+            let handle_results = stmt.query_map(
+                rusqlite::params![email],
+                |row| Ok(Handle::from_row(row))
+            )?;
 
-            let handle = stmt
-                .query_map([], |row| Ok(Handle::from_row(row)))
-                .map_err(|e| anyhow::anyhow!("Failed to execute handle query: {}", e))?
-                .next();
-
-            if let Some(Ok(handle)) = handle {
-                return Ok(Some(
-                    Handle::extract(handle).map_err(|e| anyhow::anyhow!("Failed to extract handle: {}", e))?,
-                ));
+            for handle_result in handle_results {
+                if let Ok(handle) = handle_result {
+                    let extracted = Handle::extract(Ok(handle)).map_err(|e| anyhow::anyhow!("Failed to extract handle: {}", e))?;
+                    return Ok(Some(extracted));
+                }
             }
         }
 
@@ -270,18 +270,18 @@ impl IMessageDatabaseRepo {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
-        // Query for chats with this handle
-        let mut stmt = Chat::get_by_handle_id(&db, handle.rowid).map_err(|e| anyhow::anyhow!("Failed to prepare chat query: {}", e))?;
-
-        let chats = stmt
-            .query_map([], |row| Ok(Chat::from_row(row)))
-            .map_err(|e| anyhow::anyhow!("Failed to execute chat query: {}", e))?;
+        // Query for chats with this handle using SQL
+        let mut stmt = db.prepare("SELECT * FROM chat WHERE ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id = ?)")?;
+        let chats = stmt.query_map(
+            rusqlite::params![handle.rowid],
+            |row| Ok(Chat::from_row(row))
+        )?;
 
         // Return the first chat found
         for chat_result in chats {
             if let Ok(chat) = chat_result {
                 return Ok(Some(
-                    Chat::extract(chat).map_err(|e| anyhow::anyhow!("Failed to extract chat: {}", e))?,
+                    Chat::extract(Ok(chat)).map_err(|e| anyhow::anyhow!("Failed to extract chat: {}", e))?,
                 ));
             }
         }
@@ -290,11 +290,11 @@ impl IMessageDatabaseRepo {
     }
 
     // Get messages for a chat
-    async fn get_messages_for_chat(&self, chat: &Chat) -> Result<Vec<ImessageMessage>> {
-        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+    async fn get_messages_for_chat(&self, _chat: &Chat) -> Result<Vec<ImessageMessage>> {
+        let _db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
         
         // Try to get messages using chat_identifier
-        let mut messages = Vec::new();
+        let messages = Vec::new();
         // Note: The API may have changed - this is a placeholder implementation
         // You may need to adjust based on the actual imessage-database API
         Ok(messages)
@@ -365,22 +365,12 @@ impl MessageRepository for IMessageDatabaseRepo {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
 
-        // Get messages for this chat
-        // Note: The imessage-database API has changed. You may need to update this
-        // to use the correct method for fetching messages by chat.
-        // For now, this is a placeholder that needs to be implemented based on
-        // the actual imessage-database 2.4.0 API.
-        let mut stmt = match Chat::get_by_handle_id(&db, handle.rowid) {
-            Ok(stmt) => stmt,
-            Err(e) => return Err(anyhow::anyhow!("Failed to prepare chat query: {}", e)),
-        };
-
-        // Try to get messages - this needs to be updated based on actual API
-        // The get_by_chat_id method may not exist or may have changed
-        let _chat_messages = match ImessageMessage::from_guid("", &db) {
-            Ok(_) => {},
-            Err(_) => {},
-        };
+        // Get messages for this chat using SQL query
+        let mut stmt = db.prepare("SELECT * FROM message WHERE ROWID IN (SELECT message_id FROM chat_message_join WHERE chat_id = ?) ORDER BY date ASC")?;
+        let message_results = stmt.query_map(
+            rusqlite::params![chat.rowid],
+            |row| Ok(ImessageMessage::from_row(row))
+        )?;
 
         // Convert to our Message format
         let mut messages = Vec::new();
@@ -389,7 +379,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
         for message_result in message_results {
             if let Ok(imessage) = message_result {
-                let mut msg = ImessageMessage::extract(imessage).map_err(|e| anyhow::anyhow!("Failed to extract message: {}", e))?;
+                let mut msg = ImessageMessage::extract(Ok(imessage)).map_err(|e| anyhow::anyhow!("Failed to extract message: {}", e))?;
 
                 // Generate text content
                 msg.generate_text(&db);
@@ -398,18 +388,18 @@ impl MessageRepository for IMessageDatabaseRepo {
                 if let Some(text) = msg.text {
                     // Apply date filter if provided
                     if let Some(start) = &date_range.start {
-                        // msg.date is i64 (timestamp), convert to NaiveDateTime for comparison
-                        let msg_date = NaiveDateTime::from_timestamp_opt(msg.date / 1000000000, ((msg.date % 1000000000) as u32) * 1000)
+                        // msg.date is i64 (timestamp in nanoseconds), convert to DateTime for comparison
+                        let msg_date = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
                             .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
-                        if msg_date < start.naive_utc() {
+                        if msg_date < *start {
                             continue;
                         }
                     }
 
                     if let Some(end) = &date_range.end {
-                        let msg_date = NaiveDateTime::from_timestamp_opt(msg.date / 1000000000, ((msg.date % 1000000000) as u32) * 1000)
+                        let msg_date = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
                             .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
-                        if msg_date > end.naive_utc() {
+                        if msg_date > *end {
                             continue;
                         }
                     }
@@ -418,9 +408,10 @@ impl MessageRepository for IMessageDatabaseRepo {
                     let sender = if msg.is_from_me { "Jess".to_string() } else { contact.name.clone() };
 
                     // Convert date (msg.date is i64 timestamp in nanoseconds)
-                    let msg_date = NaiveDateTime::from_timestamp_opt(msg.date / 1000000000, ((msg.date % 1000000000) as u32) * 1000)
+                    let msg_date_time = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
                         .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
-                    let timestamp = Local.from_utc_datetime(&msg_date);
+                    let timestamp = msg_date_time.with_timezone(&Local);
+                    let msg_date = msg_date_time.naive_utc();
 
                     // Convert to our message format
                     let new_message = NewMessage {

@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime};
 use clap::{Parser, Subcommand};
 use imessage_database::util::dirs;
-use repository::IMessageDatabaseRepo;
+use crate::repository::IMessageDatabaseRepo;
 use std::path::PathBuf;
 
 use crate::db::Database;
@@ -193,8 +193,8 @@ async fn import_messages(
     name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>, lines: Option<usize>,
     output_dir: &str,
 ) -> Result<()> {
-    // Get iMessage database path
-    let chat_db_path = dirs::get_imessage_chat_db_path().context("Failed to locate iMessage database")?;
+    // Get iMessage database path - use default location or environment variable
+    let chat_db_path = dirs::get_chat_db().context("Failed to locate iMessage database")?;
 
     println!("Using iMessage database at: {}", chat_db_path.display());
 
@@ -287,7 +287,7 @@ async fn export_conversation_by_person(
     let output_path = std::path::Path::new(output_dir);
 
     // Create repository
-    let repo = repository::Repository::new(db.clone());
+    let repo = crate::repository::Repository::new(db.clone());
 
     // Export conversation
     println!("Exporting conversation with: {}", name);
