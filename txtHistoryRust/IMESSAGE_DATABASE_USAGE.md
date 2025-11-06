@@ -4,6 +4,8 @@
 
 The project uses `imessage-database` v2.4.0 to read messages directly from the macOS iMessage database, replacing the need for the external `imessage-exporter` command-line tool used in the Python version.
 
+> **See also**: [Comparison with `imessage-exporter`](./IMESSAGE_EXPORTER_VS_IMESSAGE_DATABASE.md) for a detailed analysis of why `imessage-database` is more powerful.
+
 ## Usage Pattern
 
 ### 1. **Direct Database Access** (`IMessageDatabaseRepo`)
