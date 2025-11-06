@@ -1,20 +1,19 @@
-use anyhow::Result;
+use crate::error::{Result, TxtHistoryError};
 use async_trait::async_trait;
-use chrono::{Local, NaiveDateTime, DateTime};
-use csv::Writer;
+use chrono::{Local, DateTime};
 use imessage_database::tables::{
     chat::Chat,
     handle::Handle,
     messages::Message as ImessageMessage,
     table::{Table, get_connection},
 };
-use serde_json;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use rusqlite;
 use std::path::{Path, PathBuf};
 
 use crate::{db::Database, models::{NewMessage, Message}};
 use crate::models::{Contact, DateRange, OutputFormat};
+use crate::file_writer::write_messages_to_file;
+use crate::utils::{chunk_by_size, chunk_by_lines};
 
 /// Repository trait for interacting with message data
 #[async_trait]
@@ -53,9 +52,9 @@ impl Repository {
 
         // Chunk messages based on size or line count
         let chunks = if let Some(size) = size_mb {
-            self.chunk_by_size(&db_messages, size)
+            chunk_by_size(&db_messages, size)
         } else if let Some(lines) = lines_per_chunk {
-            self.chunk_by_lines(&db_messages, lines)
+            chunk_by_lines(&db_messages, lines)
         } else {
             vec![db_messages] // No chunking
         };
@@ -79,126 +78,9 @@ impl Repository {
 
     /// Save messages to a file in the specified format
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, file_path: &Path) -> Result<()> {
-        match format {
-            OutputFormat::Txt => self.save_txt(messages, file_path).await?,
-            OutputFormat::Csv => self.save_csv(messages, file_path).await?,
-            OutputFormat::Json => self.save_json(messages, file_path).await?,
-        }
-
-        Ok(())
-    }
-
-    /// Save messages to a text file
-    async fn save_txt(&self, messages: &[Message], file_path: &Path) -> Result<()> {
-        let file = File::create(file_path)?;
-        let mut writer = BufWriter::new(file);
-
-        for message in messages {
-            writeln!(
-                writer,
-                "{}, {}, {}",
-                message.sender,
-                message.timestamp.format("%b %d, %Y %r"),
-                message.content
-            )?;
-            writeln!(writer)?; // Add blank line between messages
-        }
-
-        Ok(())
-    }
-
-    /// Save messages to a CSV file
-    async fn save_csv(&self, messages: &[Message], file_path: &Path) -> Result<()> {
-        let file = File::create(file_path)?;
-        let mut writer = Writer::from_writer(file);
-
-        for message in messages {
-            writer.write_record(&[
-                &message.sender,
-                &message.timestamp.format("%b %d, %Y %r").to_string(),
-                &message.content,
-            ])?;
-        }
-
-        writer.flush()?;
-        Ok(())
-    }
-
-    /// Save messages to a JSON file
-    async fn save_json(&self, messages: &[Message], file_path: &Path) -> Result<()> {
-        let file = File::create(file_path)?;
-        let mut writer = BufWriter::new(file);
-
-        let json_messages: Vec<_> = messages
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "sender": m.sender,
-                    "timestamp": m.timestamp.format("%b %d, %Y %r").to_string(),
-                    "content": m.content,
-                })
-            })
-            .collect();
-
-        writeln!(writer, "[")?;
-        for (i, json_message) in json_messages.iter().enumerate() {
-            if i > 0 {
-                writeln!(writer, ",")?;
-            }
-            writeln!(writer, "{}", json_message)?;
-        }
-        writeln!(writer, "]")?;
-
-        Ok(())
-    }
-
-    /// Chunk messages by approximate size in MB
-    fn chunk_by_size(&self, messages: &[Message], size_mb: f64) -> Vec<Vec<Message>> {
-        let size_bytes = (size_mb * 1024.0 * 1024.0) as usize;
-        let mut chunks = Vec::new();
-        let mut current_chunk = Vec::new();
-        let mut current_size = 0;
-
-        for message in messages {
-            // Estimate size of message in bytes
-            let message_size = message.sender.len() + message.content.len() + 50; // 50 bytes for timestamp and overhead
-
-            if current_size + message_size > size_bytes && !current_chunk.is_empty() {
-                chunks.push(current_chunk);
-                current_chunk = Vec::new();
-                current_size = 0;
-            }
-
-            current_chunk.push(message.clone());
-            current_size += message_size;
-        }
-
-        if !current_chunk.is_empty() {
-            chunks.push(current_chunk);
-        }
-
-        chunks
-    }
-
-    /// Chunk messages by line count
-    fn chunk_by_lines(&self, messages: &[Message], lines_per_chunk: usize) -> Vec<Vec<Message>> {
-        let mut chunks = Vec::new();
-        let mut current_chunk = Vec::new();
-
-        for (i, message) in messages.iter().enumerate() {
-            current_chunk.push(message.clone());
-
-            if (i + 1) % lines_per_chunk == 0 && !current_chunk.is_empty() {
-                chunks.push(current_chunk);
-                current_chunk = Vec::new();
-            }
-        }
-
-        if !current_chunk.is_empty() {
-            chunks.push(current_chunk);
-        }
-
-        chunks
+        // Use shared file writer - note: this is synchronous but we keep async signature
+        // for trait compatibility. Consider making this sync or using tokio::fs.
+        write_messages_to_file(messages, format, file_path)
     }
 }
 
@@ -212,7 +94,10 @@ impl IMessageDatabaseRepo {
     pub fn new(chat_db_path: PathBuf) -> Result<Self> {
         // Validate that the path exists
         if !chat_db_path.exists() {
-            return Err(anyhow::anyhow!("iMessage database path does not exist: {:?}", chat_db_path));
+            return Err(TxtHistoryError::IMessageDatabase(format!(
+                "iMessage database path does not exist: {:?}",
+                chat_db_path
+            )));
         }
 
         // Initialize our database
@@ -227,19 +112,23 @@ impl IMessageDatabaseRepo {
     // Helper method to find a handle by phone or email
     async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
         // Create a connection to the iMessage database
-        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+        let db = get_connection(&self.db_path)
+            .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
 
         // Try to find by phone first using SQL query
         if let Some(phone) = &contact.phone {
-            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?1 OR id = ?2")?;
+            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?1 OR id = ?2")
+                .map_err(TxtHistoryError::from)?;
             let handle_results = stmt.query_map(
                 rusqlite::params![phone, format!("+{}", phone.trim_start_matches('+'))],
                 |row| Ok(Handle::from_row(row))
-            )?;
+            )
+            .map_err(TxtHistoryError::from)?;
 
             for handle_result in handle_results {
                 if let Ok(handle) = handle_result {
-                    let extracted = Handle::extract(Ok(handle)).map_err(|e| anyhow::anyhow!("Failed to extract handle: {}", e))?;
+                    let extracted = Handle::extract(Ok(handle))
+                        .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract handle: {}", e)))?;
                     return Ok(Some(extracted));
                 }
             }
@@ -247,15 +136,18 @@ impl IMessageDatabaseRepo {
 
         // Then try by email
         if let Some(email) = &contact.email {
-            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?")?;
+            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?")
+                .map_err(TxtHistoryError::from)?;
             let handle_results = stmt.query_map(
                 rusqlite::params![email],
                 |row| Ok(Handle::from_row(row))
-            )?;
+            )
+            .map_err(TxtHistoryError::from)?;
 
             for handle_result in handle_results {
                 if let Ok(handle) = handle_result {
-                    let extracted = Handle::extract(Ok(handle)).map_err(|e| anyhow::anyhow!("Failed to extract handle: {}", e))?;
+                    let extracted = Handle::extract(Ok(handle))
+                        .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract handle: {}", e)))?;
                     return Ok(Some(extracted));
                 }
             }
@@ -268,20 +160,24 @@ impl IMessageDatabaseRepo {
     // Helper method to find a chat by handle
     async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
         // Create a connection to the iMessage database
-        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+        let db = get_connection(&self.db_path)
+            .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
 
         // Query for chats with this handle using SQL
-        let mut stmt = db.prepare("SELECT * FROM chat WHERE ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id = ?)")?;
+        let mut stmt = db.prepare("SELECT * FROM chat WHERE ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id = ?)")
+            .map_err(TxtHistoryError::from)?;
         let chats = stmt.query_map(
             rusqlite::params![handle.rowid],
             |row| Ok(Chat::from_row(row))
-        )?;
+        )
+        .map_err(TxtHistoryError::from)?;
 
         // Return the first chat found
         for chat_result in chats {
             if let Ok(chat) = chat_result {
                 return Ok(Some(
-                    Chat::extract(Ok(chat)).map_err(|e| anyhow::anyhow!("Failed to extract chat: {}", e))?,
+                    Chat::extract(Ok(chat))
+                        .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract chat: {}", e)))?,
                 ));
             }
         }
@@ -291,7 +187,8 @@ impl IMessageDatabaseRepo {
 
     // Get messages for a chat
     async fn get_messages_for_chat(&self, _chat: &Chat) -> Result<Vec<ImessageMessage>> {
-        let _db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+        let _db = get_connection(&self.db_path)
+            .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
         
         // Try to get messages using chat_identifier
         let messages = Vec::new();
@@ -353,24 +250,27 @@ impl MessageRepository for IMessageDatabaseRepo {
         // Find handle for the contact
         let handle = match self.find_handle(contact).await? {
             Some(h) => h,
-            None => return Err(anyhow::anyhow!("No handle found for contact: {}", contact.name)),
+            None => return Err(TxtHistoryError::HandleNotFound(contact.name.clone())),
         };
 
         // Find chat for the handle
         let chat = match self.find_chat_by_handle(&handle).await? {
             Some(c) => c,
-            None => return Err(anyhow::anyhow!("No chat found for contact: {}", contact.name)),
+            None => return Err(TxtHistoryError::ChatNotFound(contact.name.clone())),
         };
 
         // Create a connection to the iMessage database
-        let db = get_connection(&self.db_path).map_err(|e| anyhow::anyhow!("Failed to connect to iMessage database: {}", e))?;
+        let db = get_connection(&self.db_path)
+            .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
 
         // Get messages for this chat using SQL query
-        let mut stmt = db.prepare("SELECT * FROM message WHERE ROWID IN (SELECT message_id FROM chat_message_join WHERE chat_id = ?) ORDER BY date ASC")?;
+        let mut stmt = db.prepare("SELECT * FROM message WHERE ROWID IN (SELECT message_id FROM chat_message_join WHERE chat_id = ?) ORDER BY date ASC")
+            .map_err(TxtHistoryError::from)?;
         let message_results = stmt.query_map(
             rusqlite::params![chat.rowid],
             |row| Ok(ImessageMessage::from_row(row))
-        )?;
+        )
+        .map_err(TxtHistoryError::from)?;
 
         // Convert to our Message format
         let mut messages = Vec::new();
@@ -379,7 +279,8 @@ impl MessageRepository for IMessageDatabaseRepo {
 
         for message_result in message_results {
             if let Ok(imessage) = message_result {
-                let mut msg = ImessageMessage::extract(Ok(imessage)).map_err(|e| anyhow::anyhow!("Failed to extract message: {}", e))?;
+                let mut msg = ImessageMessage::extract(Ok(imessage))
+                    .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract message: {}", e)))?;
 
                 // Generate text content
                 msg.generate_text(&db);
@@ -390,7 +291,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                     if let Some(start) = &date_range.start {
                         // msg.date is i64 (timestamp in nanoseconds), convert to DateTime for comparison
                         let msg_date = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
-                            .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
+                            .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
                         if msg_date < *start {
                             continue;
                         }
@@ -398,7 +299,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
                     if let Some(end) = &date_range.end {
                         let msg_date = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
-                            .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
+                            .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
                         if msg_date > *end {
                             continue;
                         }
@@ -409,7 +310,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
                     // Convert date (msg.date is i64 timestamp in nanoseconds)
                     let msg_date_time = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
-                        .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", msg.date))?;
+                        .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
                     let timestamp = msg_date_time.with_timezone(&Local);
                     let msg_date = msg_date_time.naive_utc();
 
@@ -451,59 +352,9 @@ impl MessageRepository for IMessageDatabaseRepo {
     }
 
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
-        match format {
-            OutputFormat::Txt => {
-                let file = File::create(path)?;
-                let mut writer = BufWriter::new(file);
-
-                for message in messages {
-                    writeln!(
-                        &mut writer,
-                        "{}, {}, {}",
-                        message.sender,
-                        message.timestamp.format("%b %d, %Y %l:%M:%S %p"),
-                        message.content
-                    )?;
-                    writeln!(&mut writer)?; // Add blank line between messages
-                }
-
-                Ok(())
-            },
-            OutputFormat::Csv => {
-                let file = File::create(path)?;
-                let mut writer = Writer::from_writer(file);
-
-                for message in messages {
-                    writer.write_record(&[
-                        &message.sender,
-                        &message.timestamp.format("%b %d, %Y %l:%M:%S %p").to_string(),
-                        &message.content,
-                    ])?;
-                }
-
-                writer.flush()?;
-                Ok(())
-            },
-            OutputFormat::Json => {
-                let file = File::create(path)?;
-                let writer = BufWriter::new(file);
-
-                // Convert messages to serializable format
-                let json_messages: Vec<serde_json::Value> = messages
-                    .iter()
-                    .map(|msg| {
-                        serde_json::json!({
-                            "sender": msg.sender,
-                            "timestamp": msg.timestamp.to_rfc3339(),
-                            "content": msg.content
-                        })
-                    })
-                    .collect();
-
-                serde_json::to_writer_pretty(writer, &json_messages)?;
-                Ok(())
-            },
-        }
+        // Use shared file writer - note: this is synchronous but we keep async signature
+        // for trait compatibility. Consider making this sync or using tokio::fs.
+        write_messages_to_file(messages, format, path)
     }
 
     async fn export_conversation_by_person(
@@ -517,7 +368,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                 phone: c.phone,
                 email: c.email,
             },
-            None => return Err(anyhow::anyhow!("Contact not found: {}", person_name)),
+            None => return Err(TxtHistoryError::ContactNotFound(person_name.to_string())),
         };
 
         // Fetch messages
@@ -525,7 +376,7 @@ impl MessageRepository for IMessageDatabaseRepo {
 
         // If no messages, return early
         if messages.is_empty() {
-            return Err(anyhow::anyhow!("No messages found for contact: {}", person_name));
+            return Err(TxtHistoryError::Other(format!("No messages found for contact: {}", person_name)));
         }
 
         // Create output files

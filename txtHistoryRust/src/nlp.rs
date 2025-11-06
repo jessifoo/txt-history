@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::{Result, TxtHistoryError};
 use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
 use serde::{Deserialize, Serialize};
@@ -211,7 +211,7 @@ impl NlpProcessor {
             // Get the message from the database
             let message = db
                 .get_message_by_id(message_id)?
-                .context(format!("Message with ID {} not found", message_id))?;
+                .ok_or_else(|| TxtHistoryError::Other(format!("Message with ID {} not found", message_id)))?;
 
             // Skip messages without text
             if message.text.is_none() {

@@ -3,6 +3,9 @@ mod models;
 mod nlp;
 mod repository;
 mod schema;
+mod error;
+mod file_writer;
+mod utils;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime};
@@ -14,6 +17,8 @@ use std::path::PathBuf;
 use crate::db::Database;
 use crate::models::{Contact, DateRange, OutputFormat};
 use crate::nlp::NlpProcessor;
+use crate::file_writer::write_messages_to_file;
+use crate::utils::{chunk_by_size, chunk_by_lines};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -446,27 +451,18 @@ fn write_messages_to_files(
         return Ok(());
     }
 
-    // Determine chunking strategy
-    let chunk_size = if let Some(size) = size_mb {
-        // Estimate bytes per message and calculate chunk size
-        let avg_msg_size = messages
-            .iter()
-            .map(|m| m.content.len() + m.sender.len() + 50) // Add some overhead for formatting
-            .sum::<usize>() as f64
-            / messages.len() as f64;
+    // Create output directory if it doesn't exist
+    std::fs::create_dir_all(output_dir)?;
 
-        let bytes_per_mb = 1024.0 * 1024.0;
-        let msgs_per_chunk = (size * bytes_per_mb / avg_msg_size).ceil() as usize;
-        msgs_per_chunk.max(1) // Ensure at least one message per chunk
+    // Chunk messages using shared utilities
+    let chunks = if let Some(size) = size_mb {
+        chunk_by_size(messages, size)
     } else if let Some(lines) = lines_per_chunk {
-        lines
+        chunk_by_lines(messages, lines)
     } else {
-        // Default to all messages in one file
-        messages.len()
+        vec![messages.to_vec()] // No chunking
     };
 
-    // Create chunks
-    let chunks: Vec<_> = messages.chunks(chunk_size).collect();
     println!("Writing {} chunks", chunks.len());
 
     // Process each chunk
@@ -477,17 +473,17 @@ fn write_messages_to_files(
         match format {
             OutputFormat::Txt => {
                 let file_path = format!("{}.txt", file_base);
-                write_txt_file(chunk, &file_path)?;
+                write_messages_to_file(chunk, format, std::path::Path::new(&file_path))?;
                 println!("Wrote {} messages to {}", chunk.len(), file_path);
             },
             OutputFormat::Csv => {
                 let file_path = format!("{}.csv", file_base);
-                write_csv_file(chunk, &file_path)?;
+                write_messages_to_file(chunk, format, std::path::Path::new(&file_path))?;
                 println!("Wrote {} messages to {}", chunk.len(), file_path);
             },
             OutputFormat::Json => {
                 let file_path = format!("{}.json", file_base);
-                write_json_file(chunk, &file_path)?;
+                write_messages_to_file(chunk, format, std::path::Path::new(&file_path))?;
                 println!("Wrote {} messages to {}", chunk.len(), file_path);
             },
         }
@@ -496,78 +492,3 @@ fn write_messages_to_files(
     Ok(())
 }
 
-/// Write messages to a text file
-fn write_txt_file(messages: &[models::Message], file_path: &str) -> Result<()> {
-    use std::fs::File;
-    use std::io::{BufWriter, Write};
-
-    let file = File::create(file_path)?;
-    let mut writer = BufWriter::new(file);
-
-    for message in messages {
-        writeln!(
-            writer,
-            "{}, {}, {}\n",
-            message.sender,
-            message.timestamp.format("%b %d, %Y %r"),
-            message.content
-        )?;
-    }
-
-    Ok(())
-}
-
-/// Write messages to a CSV file
-fn write_csv_file(messages: &[models::Message], file_path: &str) -> Result<()> {
-    use std::fs::File;
-    use std::io::BufWriter;
-
-    let file = File::create(file_path)?;
-    let mut writer = csv::Writer::from_writer(BufWriter::new(file));
-
-    // Write header
-    writer.write_record(&["Sender", "Timestamp", "Content"])?;
-
-    // Write data
-    for message in messages {
-        writer.write_record(&[
-            &message.sender,
-            &message.timestamp.format("%b %d, %Y %r").to_string(),
-            &message.content,
-        ])?;
-    }
-
-    writer.flush()?;
-    Ok(())
-}
-
-/// Write messages to a JSON file
-fn write_json_file(messages: &[models::Message], file_path: &str) -> Result<()> {
-    use std::fs::File;
-    use std::io::Write;
-
-    let file = File::create(file_path)?;
-    let mut writer = std::io::BufWriter::new(file);
-
-    let json_messages: Vec<_> = messages
-        .iter()
-        .map(|m| {
-            serde_json::json!({
-                "sender": m.sender,
-                "timestamp": m.timestamp.format("%b %d, %Y %r").to_string(),
-                "content": m.content,
-            })
-        })
-        .collect();
-
-    writeln!(writer, "[")?;
-    for (i, json_message) in json_messages.iter().enumerate() {
-        if i > 0 {
-            writeln!(writer, ",")?;
-        }
-        writeln!(writer, "{}", json_message)?;
-    }
-    writeln!(writer, "]")?;
-
-    Ok(())
-}

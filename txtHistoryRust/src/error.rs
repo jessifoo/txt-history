@@ -48,6 +48,10 @@ pub enum TxtHistoryError {
     #[error("Binary serialization error: {0}")]
     Bincode(#[from] bincode::Error),
 
+    /// CSV writing errors
+    #[error("CSV error: {0}")]
+    Csv(#[from] csv::Error),
+
     /// Cache errors
     #[error("Cache error: {0}")]
     Cache(String),
@@ -69,5 +73,14 @@ impl From<anyhow::Error> for TxtHistoryError {
 impl From<sled::Error> for TxtHistoryError {
     fn from(err: sled::Error) -> Self {
         TxtHistoryError::Cache(err.to_string())
+    }
+}
+
+impl From<r2d2::Error> for TxtHistoryError {
+    fn from(err: r2d2::Error) -> Self {
+        TxtHistoryError::Database(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            Some(format!("Connection pool error: {}", err))
+        ))
     }
 }

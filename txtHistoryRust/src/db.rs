@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use crate::error::{Result, TxtHistoryError};
 use chrono::{NaiveDateTime, Utc};
 use r2d2::Pool;
 use rusqlite::{Connection, Row, params, OptionalExtension};
@@ -57,8 +57,7 @@ impl Database {
         // Set up connection manager and pool
         let manager = SqliteConnectionManager::file(database_url);
         let pool = Pool::builder()
-            .build(manager)
-            .context("Failed to create database connection pool")?;
+            .build(manager)?;
 
         // Run migrations
         let conn = pool.get()?;
@@ -71,21 +70,21 @@ impl Database {
     fn run_migrations(conn: &Connection) -> Result<()> {
         // Create tables if they don't exist
         conn.execute_batch(include_str!("../migrations/2025-03-15-000000_create_tables/up.sql"))
-            .context("Failed to run initial migration")?;
+            .map_err(TxtHistoryError::from)?;
 
         // Run additional migrations
         conn.execute_batch(include_str!("../migrations/2025-03-15-000001_add_processed_messages/up.sql"))
-            .context("Failed to run processed_messages migration")?;
+            .map_err(TxtHistoryError::from)?;
 
         conn.execute_batch(include_str!("../migrations/2025-03-19-000000_enhance_contact_linking/up.sql"))
-            .context("Failed to run contact linking migration")?;
+            .map_err(TxtHistoryError::from)?;
 
         Ok(())
     }
 
     /// Get a connection from the pool
     pub fn get_connection(&self) -> Result<DbConnection> {
-        self.pool.get().context("Failed to get database connection")
+        self.pool.get().map_err(Into::into)
     }
 
     /// Initialize the database with default settings
@@ -120,7 +119,8 @@ impl Database {
         }
 
         // Return the contact
-        self.get_contact(name)?.ok_or_else(|| anyhow::anyhow!("Failed to retrieve contact: {}", name))
+        self.get_contact(name)?
+            .ok_or_else(|| TxtHistoryError::ContactNotFound(name.to_string()))
     }
 
     /// Add a new message to the database if it doesn't already exist
@@ -319,7 +319,7 @@ impl Database {
                 // Get the updated contact
                 return self
                     .get_contact(&new_contact.name)?
-                    .ok_or_else(|| anyhow::anyhow!("Failed to retrieve updated contact: {}", new_contact.name));
+                    .ok_or_else(|| TxtHistoryError::ContactNotFound(new_contact.name.clone()));
             }
 
             Ok(contact)
@@ -332,7 +332,7 @@ impl Database {
 
             // Get the newly inserted contact
             self.get_contact(&new_contact.name)?
-                .ok_or_else(|| anyhow::anyhow!("Failed to retrieve newly inserted contact: {}", new_contact.name))
+                .ok_or_else(|| TxtHistoryError::ContactNotFound(new_contact.name.clone()))
         }
     }
 
@@ -345,7 +345,7 @@ impl Database {
         // Get the contact
         let _contact = self
             .get_contact(person_name)?
-            .ok_or_else(|| anyhow::anyhow!("Contact not found: {}", person_name))?;
+            .ok_or_else(|| TxtHistoryError::ContactNotFound(person_name.to_string()))?;
 
         // Get messages where the sender is the person
         let mut query = "SELECT * FROM messages WHERE sender = ?".to_string();
