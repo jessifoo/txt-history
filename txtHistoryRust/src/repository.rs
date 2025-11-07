@@ -296,10 +296,35 @@ impl MessageRepository for IMessageDatabaseRepo {
 
         // Convert to our Message format
         let mut messages = Vec::new();
-        let me_contact = self.database.get_contact("Jess")?
-            .ok_or_else(|| TxtHistoryError::ContactNotFound("Jess".to_string()))?;
-        let db_contact = self.database.get_contact(&contact.name)?
-            .ok_or_else(|| TxtHistoryError::ContactNotFound(contact.name.clone()))?;
+
+        // Ensure contacts exist in database (create if they don't)
+        let me_contact = match self.database.get_contact("Jess")? {
+            Some(c) => c,
+            None => {
+                // Auto-create "Jess" contact if it doesn't exist
+                self.database.add_or_update_contact(crate::models::NewContact {
+                    name: "Jess".to_string(),
+                    phone: None,
+                    email: None,
+                    is_me: true,
+                    primary_identifier: Some("Jess".to_string()),
+                })?
+            },
+        };
+
+        let db_contact = match self.database.get_contact(&contact.name)? {
+            Some(c) => c,
+            None => {
+                // Auto-create contact if it doesn't exist
+                self.database.add_or_update_contact(crate::models::NewContact {
+                    name: contact.name.clone(),
+                    phone: contact.phone.clone(),
+                    email: contact.email.clone(),
+                    is_me: false,
+                    primary_identifier: None,
+                })?
+            },
+        };
 
         for message_result in message_results {
             if let Ok(imessage) = message_result {
@@ -311,25 +336,21 @@ impl MessageRepository for IMessageDatabaseRepo {
 
                 // Skip messages without text
                 if let Some(text) = msg.text {
+                    // Convert date once (msg.date is i64 timestamp in nanoseconds)
+                    let seconds = msg.date / 1_000_000_000;
+                    let nanoseconds = (msg.date % 1_000_000_000) as u32;
+                    let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
+                        .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
+
                     // Apply date filter if provided
                     if let Some(start) = &date_range.start {
-                        // msg.date is i64 (timestamp in nanoseconds), convert to DateTime for
-                        // comparison
-                        let seconds = msg.date / 1_000_000_000;
-                        let nanoseconds = (msg.date % 1_000_000_000) as u32;
-                        let msg_date = DateTime::from_timestamp(seconds, nanoseconds)
-                            .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
-                        if msg_date < *start {
+                        if msg_date_time < *start {
                             continue;
                         }
                     }
 
                     if let Some(end) = &date_range.end {
-                        let seconds = msg.date / 1_000_000_000;
-                        let nanoseconds = (msg.date % 1_000_000_000) as u32;
-                        let msg_date = DateTime::from_timestamp(seconds, nanoseconds)
-                            .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
-                        if msg_date > *end {
+                        if msg_date_time > *end {
                             continue;
                         }
                     }
@@ -342,11 +363,7 @@ impl MessageRepository for IMessageDatabaseRepo {
                         continue;
                     }
 
-                    // Convert date (msg.date is i64 timestamp in nanoseconds)
-                    let seconds = msg.date / 1_000_000_000;
-                    let nanoseconds = (msg.date % 1_000_000_000) as u32;
-                    let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
-                        .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
+                    // Use the already-converted date
                     let timestamp = msg_date_time.with_timezone(&Local);
                     let msg_date = msg_date_time.naive_utc();
 
@@ -384,6 +401,9 @@ impl MessageRepository for IMessageDatabaseRepo {
             }
         }
 
+        // Ensure messages are sorted chronologically after filtering
+        messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
         Ok(messages)
     }
 
@@ -411,9 +431,9 @@ impl MessageRepository for IMessageDatabaseRepo {
         // Fetch messages
         let messages = self.fetch_messages(&contact, date_range, only_contact).await?;
 
-        // If no messages, return early
+        // Return empty Vec if no messages (consistent with Repository implementation)
         if messages.is_empty() {
-            return Err(TxtHistoryError::Other(format!("No messages found for contact: {}", person_name)));
+            return Ok(Vec::new());
         }
 
         // Create output files

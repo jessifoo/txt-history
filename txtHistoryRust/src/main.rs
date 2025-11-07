@@ -479,6 +479,17 @@ fn parse_date_range(start_date: &Option<String>, end_date: &Option<String>) -> R
         None
     };
 
+    // Validate that start < end if both are provided
+    if let (Some(start_dt), Some(end_dt)) = (&start, &end) {
+        if start_dt > end_dt {
+            return Err(TxtHistoryError::InvalidDate(format!(
+                "Start date ({}) must be before end date ({})",
+                start_dt.format("%Y-%m-%d"),
+                end_dt.format("%Y-%m-%d")
+            )));
+        }
+    }
+
     Ok(DateRange {
         start,
         end,
