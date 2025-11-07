@@ -1,36 +1,42 @@
 //! File writing utilities for message export.
 //!
-//! This module provides functions for writing messages to files in various formats
-//! (TXT, CSV, JSON) with consistent formatting, matching the Python script's output structure.
+//! This module provides functions for writing messages to files in various
+//! formats (TXT, CSV, JSON) with consistent formatting, matching the Python
+//! script's output structure.
 
-use crate::error::Result;
-use crate::models::{Message, OutputFormat};
+use std::{
+    fs::{File, create_dir_all},
+    io::{BufWriter, Write},
+    path::{Path, PathBuf},
+};
+
 use csv::Writer;
 use serde_json;
-use std::fs::{File, create_dir_all};
-use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+
+use crate::{
+    error::Result,
+    models::{Message, OutputFormat},
+};
 
 /// Write messages to files with timestamp-based directory structure.
 ///
-/// Creates directory structure: `output_dir/timestamp/chunks_txt/` and `output_dir/timestamp/chunks_csv/`
-/// This matches the Python script's output format.
+/// Creates directory structure: `output_dir/timestamp/chunks_txt/` and
+/// `output_dir/timestamp/chunks_csv/` This matches the Python script's output
+/// format.
 ///
 /// # Arguments
 ///
 /// * `messages` - Slice of messages to write
 /// * `format` - Output format (TXT, CSV, or JSON)
 /// * `output_dir` - Base output directory
-/// * `timestamp` - Timestamp string for directory name (e.g., "2025-01-15_14-30-00")
+/// * `timestamp` - Timestamp string for directory name (e.g.,
+///   "2025-01-15_14-30-00")
 ///
 /// # Returns
 ///
 /// Vector of paths to created files
 pub fn write_messages_to_timestamped_dir(
-    messages: &[Message],
-    format: OutputFormat,
-    output_dir: &Path,
-    timestamp: &str,
+    messages: &[Message], format: OutputFormat, output_dir: &Path, timestamp: &str,
 ) -> Result<Vec<PathBuf>> {
     if messages.is_empty() {
         return Ok(Vec::new());
@@ -49,19 +55,19 @@ pub fn write_messages_to_timestamped_dir(
             let file_path = txt_dir.join("chunk_1.txt");
             write_txt_file(messages, &file_path)?;
             output_files.push(file_path);
-        }
+        },
         OutputFormat::Csv => {
             let csv_dir = date_dir.join("chunks_csv");
             create_dir_all(&csv_dir)?;
             let file_path = csv_dir.join("chunk_1.csv");
             write_csv_file(messages, &file_path)?;
             output_files.push(file_path);
-        }
+        },
         OutputFormat::Json => {
             let file_path = date_dir.join("chunk_1.json");
             write_json_file(messages, &file_path)?;
             output_files.push(file_path);
-        }
+        },
     }
 
     Ok(output_files)

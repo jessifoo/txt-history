@@ -51,10 +51,8 @@ pub fn chunk_by_size(messages: &[Message], size_mb: f64) -> Vec<Vec<Message>> {
 ///
 /// # Returns
 ///
-/// Vector of message chunks, where each chunk contains at most `lines_per_chunk` messages.
+/// Vector of message chunks, where each chunk contains at most
+/// `lines_per_chunk` messages.
 pub fn chunk_by_lines(messages: &[Message], lines_per_chunk: usize) -> Vec<Vec<Message>> {
-    messages
-        .chunks(lines_per_chunk)
-        .map(|chunk| chunk.to_vec())
-        .collect()
+    messages.chunks(lines_per_chunk).map(|chunk| chunk.to_vec()).collect()
 }

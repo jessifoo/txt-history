@@ -1,10 +1,13 @@
-use crate::error::{Result, TxtHistoryError};
-use chrono::{NaiveDateTime, Utc};
-use r2d2::Pool;
-use rusqlite::{Connection, Row, params, OptionalExtension};
 use std::path::Path;
 
-use crate::models::{DbContact, DbMessage, DbProcessedMessage, NewContact, NewMessage, NewProcessedMessage};
+use chrono::{NaiveDateTime, Utc};
+use r2d2::Pool;
+use rusqlite::{Connection, OptionalExtension, Row, params};
+
+use crate::{
+    error::{Result, TxtHistoryError},
+    models::{DbContact, DbMessage, DbProcessedMessage, NewContact, NewMessage, NewProcessedMessage},
+};
 
 // Custom connection manager for rusqlite
 pub struct SqliteConnectionManager {
@@ -28,7 +31,7 @@ impl r2d2::ManageConnection for SqliteConnectionManager {
     }
 
     fn is_valid(&self, conn: &mut Connection) -> std::result::Result<(), rusqlite::Error> {
-        conn.execute_batch("").map_err(Into::into)
+        conn.execute_batch("")
     }
 
     fn has_broken(&self, _conn: &mut Connection) -> bool {
@@ -56,14 +59,15 @@ impl Database {
 
         // Set up connection manager and pool
         let manager = SqliteConnectionManager::file(database_url);
-        let pool = Pool::builder()
-            .build(manager)?;
+        let pool = Pool::builder().build(manager)?;
 
         // Run migrations
         let conn = pool.get()?;
         Self::run_migrations(&conn)?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+        })
     }
 
     /// Run database migrations
@@ -102,20 +106,21 @@ impl Database {
     }
 
     /// Ensure a contact exists in the database
+    #[allow(clippy::too_many_arguments)]
     fn ensure_contact(&self, conn: &Connection, name: &str, phone: Option<&str>, email: Option<&str>, is_me: bool) -> Result<DbContact> {
         // Check if contact exists
-        let contact_exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM contacts WHERE name = ?)",
-            params![name],
-            |row| row.get(0),
-        )?;
+        let contact_exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM contacts WHERE name = ?)", params![name], |row| {
+            row.get(0)
+        })?;
 
         if !contact_exists {
             // Insert new contact
-            conn.execute(
-                "INSERT INTO contacts (name, phone, email, is_me) VALUES (?, ?, ?, ?)",
-                params![name, phone.map(ToString::to_string), email.map(ToString::to_string), is_me],
-            )?;
+            conn.execute("INSERT INTO contacts (name, phone, email, is_me) VALUES (?, ?, ?, ?)", params![
+                name,
+                phone.map(ToString::to_string),
+                email.map(ToString::to_string),
+                is_me
+            ])?;
         }
 
         // Return the contact
@@ -144,7 +149,8 @@ impl Database {
             let date_imported = new_message.date_imported.unwrap_or_else(|| Utc::now().naive_utc());
 
             conn.execute(
-                "INSERT INTO messages (imessage_id, text, sender, is_from_me, date_created, date_imported, handle_id, service, thread_id, has_attachments, contact_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO messages (imessage_id, text, sender, is_from_me, date_created, date_imported, handle_id, service, thread_id, \
+                 has_attachments, contact_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     new_message.imessage_id,
                     new_message.text,
@@ -162,10 +168,16 @@ impl Database {
 
             // Get the last inserted ID
             let id: i64 = conn.last_insert_rowid();
+            let id_i32 = id.try_into().map_err(|_| {
+                TxtHistoryError::Database(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_TOOBIG),
+                    Some("Message ID too large for i32".to_string()),
+                ))
+            })?;
 
             // Return the newly inserted message
             Ok(DbMessage {
-                id: id as i32,
+                id: id_i32,
                 imessage_id: new_message.imessage_id,
                 text: new_message.text,
                 sender: new_message.sender,
@@ -218,6 +230,7 @@ impl Database {
     }
 
     /// Map a database row to a DbMessage
+    #[allow(clippy::unused_self)]
     fn map_db_message(&self, row: &Row<'_>) -> rusqlite::Result<DbMessage> {
         Ok(DbMessage {
             id: row.get(0)?,
@@ -236,6 +249,7 @@ impl Database {
     }
 
     /// Map a database row to a DbContact
+    #[allow(clippy::unused_self)]
     fn map_db_contact(&self, row: &Row<'_>) -> rusqlite::Result<DbContact> {
         Ok(DbContact {
             id: row.get(0)?,
@@ -251,11 +265,9 @@ impl Database {
         let conn = self.get_connection()?;
 
         let message = conn
-            .query_row(
-                "SELECT * FROM messages WHERE id = ?",
-                params![message_id],
-                |row| self.map_db_message(row),
-            )
+            .query_row("SELECT * FROM messages WHERE id = ?", params![message_id], |row| {
+                self.map_db_message(row)
+            })
             .optional()?;
 
         Ok(message)
@@ -266,17 +278,16 @@ impl Database {
         let conn = self.get_connection()?;
 
         let contact = conn
-            .query_row(
-                "SELECT * FROM contacts WHERE name = ?",
-                params![name],
-                |row| self.map_db_contact(row),
-            )
+            .query_row("SELECT * FROM contacts WHERE name = ?", params![name], |row| {
+                self.map_db_contact(row)
+            })
             .optional()?;
 
         Ok(contact)
     }
 
-    /// Add a new contact or update an existing one with improved identifier handling
+    /// Add a new contact or update an existing one with improved identifier
+    /// handling
     pub fn add_or_update_contact(&self, new_contact: NewContact) -> Result<DbContact> {
         let conn = self.get_connection()?;
 
@@ -294,6 +305,7 @@ impl Database {
             let mut update_fields = Vec::new();
             let mut update_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
+            #[allow(clippy::collapsible_if)]
             if let Some(phone) = &new_contact.phone {
                 if contact.phone.as_ref() != Some(phone) {
                     update_fields.push("phone = ?");
@@ -301,6 +313,7 @@ impl Database {
                 }
             }
 
+            #[allow(clippy::collapsible_if)]
             if let Some(email) = &new_contact.email {
                 if contact.email.as_ref() != Some(email) {
                     update_fields.push("email = ?");
@@ -325,10 +338,12 @@ impl Database {
             Ok(contact)
         } else {
             // Insert new contact
-            conn.execute(
-                "INSERT INTO contacts (name, phone, email, is_me) VALUES (?, ?, ?, ?)",
-                params![new_contact.name, new_contact.phone, new_contact.email, new_contact.is_me],
-            )?;
+            conn.execute("INSERT INTO contacts (name, phone, email, is_me) VALUES (?, ?, ?, ?)", params![
+                new_contact.name,
+                new_contact.phone,
+                new_contact.email,
+                new_contact.is_me
+            ])?;
 
             // Get the newly inserted contact
             self.get_contact(&new_contact.name)?
@@ -336,7 +351,8 @@ impl Database {
         }
     }
 
-    /// Get all messages for a specific person, combining both phone and email conversations
+    /// Get all messages for a specific person, combining both phone and email
+    /// conversations
     pub fn get_conversation_with_person(
         &self, person_name: &str, start_date: Option<NaiveDateTime>, end_date: Option<NaiveDateTime>,
     ) -> Result<Vec<DbMessage>> {
@@ -403,7 +419,8 @@ impl Database {
             let now = Utc::now().naive_utc();
 
             conn.execute(
-                "INSERT INTO processed_messages (original_message_id, processed_text, tokens, lemmatized_text, named_entities, sentiment_score, processed_at, processing_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO processed_messages (original_message_id, processed_text, tokens, lemmatized_text, named_entities, \
+                 sentiment_score, processed_at, processing_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     new_processed.original_message_id,
                     new_processed.processed_text,
@@ -418,10 +435,16 @@ impl Database {
 
             // Get the last inserted ID
             let id: i64 = conn.last_insert_rowid();
+            let id_i32 = id.try_into().map_err(|_| {
+                TxtHistoryError::Database(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_TOOBIG),
+                    Some("Processed message ID too large for i32".to_string()),
+                ))
+            })?;
 
             // Return the newly inserted processed message
             Ok(DbProcessedMessage {
-                id: id as i32,
+                id: id_i32,
                 original_message_id: new_processed.original_message_id,
                 processed_text: new_processed.processed_text,
                 tokens: new_processed.tokens,
@@ -435,6 +458,7 @@ impl Database {
     }
 
     /// Map a database row to a DbProcessedMessage
+    #[allow(clippy::unused_self)]
     fn map_db_processed_message(&self, row: &Row<'_>) -> rusqlite::Result<DbProcessedMessage> {
         Ok(DbProcessedMessage {
             id: row.get(0)?,
@@ -484,7 +508,8 @@ impl Database {
     pub fn get_unprocessed_message_ids(&self, version: &str) -> Result<Vec<i32>> {
         let conn = self.get_connection()?;
 
-        let query = "SELECT m.id FROM messages m LEFT JOIN processed_messages p ON m.id = p.original_message_id AND p.processing_version = ? WHERE p.id IS NULL";
+        let query = "SELECT m.id FROM messages m LEFT JOIN processed_messages p ON m.id = p.original_message_id AND p.processing_version \
+                     = ? WHERE p.id IS NULL";
 
         let mut stmt = conn.prepare(&query)?;
         let id_iter = stmt.query_map(params![version], |row| row.get::<_, i32>(0))?;
@@ -505,9 +530,7 @@ impl Database {
         let total_messages: i64 = conn.query_row("SELECT COUNT(*) FROM messages", params![], |row| row.get(0))?;
 
         // Get processed message count
-        let processed_messages: i64 = conn.query_row("SELECT COUNT(*) FROM processed_messages", params![], |row| {
-            row.get(0)
-        })?;
+        let processed_messages: i64 = conn.query_row("SELECT COUNT(*) FROM processed_messages", params![], |row| row.get(0))?;
 
         // Get unique processing versions
         let mut stmt = conn.prepare("SELECT DISTINCT processing_version FROM processed_messages")?;
@@ -520,8 +543,8 @@ impl Database {
         }
 
         Ok(ProcessingStats {
-            total_messages: total_messages as usize,
-            processed_messages: processed_messages as usize,
+            total_messages: total_messages.try_into().unwrap_or(0),
+            processed_messages: processed_messages.try_into().unwrap_or(0),
             processing_versions: versions,
         })
     }

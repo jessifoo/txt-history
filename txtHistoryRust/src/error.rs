@@ -1,7 +1,7 @@
 //! Error types for the txt-history-rust library.
 //!
-//! This module provides custom error types using `thiserror` for better error handling
-//! and more specific error messages throughout the application.
+//! This module provides custom error types using `thiserror` for better error
+//! handling and more specific error messages throughout the application.
 
 use thiserror::Error;
 
@@ -80,7 +80,7 @@ impl From<r2d2::Error> for TxtHistoryError {
     fn from(err: r2d2::Error) -> Self {
         TxtHistoryError::Database(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
-            Some(format!("Connection pool error: {}", err))
+            Some(format!("Connection pool error: {err}")),
         ))
     }
 }

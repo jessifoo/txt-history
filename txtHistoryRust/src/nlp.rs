@@ -1,14 +1,16 @@
-use crate::error::{Result, TxtHistoryError};
+use std::collections::HashSet;
+
 use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use stop_words::{LANGUAGE, get};
 use unicode_normalization::UnicodeNormalization;
 use whatlang::{Lang, detect};
 
-use crate::db::Database;
-use crate::models::{DbProcessedMessage, NamedEntity, NewProcessedMessage, NlpAnalysis};
+use crate::{
+    db::Database,
+    error::{Result, TxtHistoryError},
+    models::{DbProcessedMessage, NamedEntity, NlpAnalysis},
+};
 
 /// NLP processor for text analysis
 pub struct NlpProcessor {

@@ -1,6 +1,7 @@
-use crate::error::{Result, TxtHistoryError};
+use std::path::{Path, PathBuf};
+
 use async_trait::async_trait;
-use chrono::{Local, DateTime};
+use chrono::{DateTime, Local};
 use imessage_database::tables::{
     chat::Chat,
     handle::Handle,
@@ -8,12 +9,14 @@ use imessage_database::tables::{
     table::{Table, get_connection},
 };
 use rusqlite;
-use std::path::{Path, PathBuf};
 
-use crate::{db::Database, models::{NewMessage, Message}};
-use crate::models::{Contact, DateRange, OutputFormat};
-use crate::file_writer::write_messages_to_file;
-use crate::utils::{chunk_by_size, chunk_by_lines};
+use crate::{
+    db::Database,
+    error::{Result, TxtHistoryError},
+    file_writer::write_messages_to_file,
+    models::{Contact, DateRange, Message, NewMessage, OutputFormat},
+    utils::{chunk_by_lines, chunk_by_size},
+};
 
 /// Repository trait for interacting with message data
 #[async_trait]
@@ -34,7 +37,9 @@ pub struct Repository {
 impl Repository {
     /// Create a new repository
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+        }
     }
 }
 
@@ -43,15 +48,15 @@ impl MessageRepository for Repository {
     async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange, only_contact: bool) -> Result<Vec<Message>> {
         // Get messages from database (already returns Vec<Message>)
         let mut messages = self.db.get_messages_by_contact_name(&contact.name, date_range)?;
-        
+
         // Filter out "Jess" messages if only_contact is true
         if only_contact {
             messages.retain(|m| m.sender != "Jess");
         }
-        
+
         // Ensure messages are sorted chronologically
         messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-        
+
         Ok(messages)
     }
 
@@ -95,7 +100,7 @@ impl MessageRepository for Repository {
         for (i, chunk) in chunks.iter().enumerate() {
             let file_name = format!("chunk_{}.{}", i + 1, format.extension());
             let file_path = output_path.join(file_name);
-            
+
             self.save_messages(chunk, format, &file_path).await?;
             output_files.push(file_path);
         }
@@ -137,13 +142,14 @@ impl IMessageDatabaseRepo {
 
         // Try to find by phone first using SQL query
         if let Some(phone) = &contact.phone {
-            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?1 OR id = ?2")
+            let mut stmt = db
+                .prepare("SELECT * FROM handle WHERE id = ?1 OR id = ?2")
                 .map_err(TxtHistoryError::from)?;
-            let handle_results = stmt.query_map(
-                rusqlite::params![phone, format!("+{}", phone.trim_start_matches('+'))],
-                |row| Ok(Handle::from_row(row))
-            )
-            .map_err(TxtHistoryError::from)?;
+            let handle_results = stmt
+                .query_map(rusqlite::params![phone, format!("+{}", phone.trim_start_matches('+'))], |row| {
+                    Ok(Handle::from_row(row))
+                })
+                .map_err(TxtHistoryError::from)?;
 
             for handle_result in handle_results {
                 if let Ok(handle) = handle_result {
@@ -156,13 +162,10 @@ impl IMessageDatabaseRepo {
 
         // Then try by email
         if let Some(email) = &contact.email {
-            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?")
+            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?").map_err(TxtHistoryError::from)?;
+            let handle_results = stmt
+                .query_map(rusqlite::params![email], |row| Ok(Handle::from_row(row)))
                 .map_err(TxtHistoryError::from)?;
-            let handle_results = stmt.query_map(
-                rusqlite::params![email],
-                |row| Ok(Handle::from_row(row))
-            )
-            .map_err(TxtHistoryError::from)?;
 
             for handle_result in handle_results {
                 if let Ok(handle) = handle_result {
@@ -184,21 +187,19 @@ impl IMessageDatabaseRepo {
             .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
 
         // Query for chats with this handle using SQL
-        let mut stmt = db.prepare("SELECT * FROM chat WHERE ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id = ?)")
+        let mut stmt = db
+            .prepare("SELECT * FROM chat WHERE ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id = ?)")
             .map_err(TxtHistoryError::from)?;
-        let chats = stmt.query_map(
-            rusqlite::params![handle.rowid],
-            |row| Ok(Chat::from_row(row))
-        )
-        .map_err(TxtHistoryError::from)?;
+        let chats = stmt
+            .query_map(rusqlite::params![handle.rowid], |row| Ok(Chat::from_row(row)))
+            .map_err(TxtHistoryError::from)?;
 
         // Return the first chat found
         for chat_result in chats {
             if let Ok(chat) = chat_result {
-                return Ok(Some(
-                    Chat::extract(Ok(chat))
-                        .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract chat: {}", e)))?,
-                ));
+                return Ok(Some(Chat::extract(Ok(chat)).map_err(|e| {
+                    TxtHistoryError::IMessageDatabase(format!("Failed to extract chat: {}", e))
+                })?));
             }
         }
 
@@ -206,10 +207,11 @@ impl IMessageDatabaseRepo {
     }
 
     // Get messages for a chat
+    #[allow(dead_code)]
     async fn get_messages_for_chat(&self, _chat: &Chat) -> Result<Vec<ImessageMessage>> {
         let _db = get_connection(&self.db_path)
             .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
-        
+
         // Try to get messages using chat_identifier
         let messages = Vec::new();
         // Note: The API may have changed - this is a placeholder implementation
@@ -218,6 +220,7 @@ impl IMessageDatabaseRepo {
     }
 
     // Save messages to database
+    #[allow(dead_code)]
     async fn save_to_database(&self, messages: &[Message], contact: &Contact) -> Result<()> {
         // Ensure contact exists in database
         let db_contact = self.database.add_or_update_contact(crate::models::NewContact {
@@ -284,13 +287,12 @@ impl MessageRepository for IMessageDatabaseRepo {
             .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
 
         // Get messages for this chat using SQL query
-        let mut stmt = db.prepare("SELECT * FROM message WHERE ROWID IN (SELECT message_id FROM chat_message_join WHERE chat_id = ?) ORDER BY date ASC")
+        let mut stmt = db
+            .prepare("SELECT * FROM message WHERE ROWID IN (SELECT message_id FROM chat_message_join WHERE chat_id = ?) ORDER BY date ASC")
             .map_err(TxtHistoryError::from)?;
-        let message_results = stmt.query_map(
-            rusqlite::params![chat.rowid],
-            |row| Ok(ImessageMessage::from_row(row))
-        )
-        .map_err(TxtHistoryError::from)?;
+        let message_results = stmt
+            .query_map(rusqlite::params![chat.rowid], |row| Ok(ImessageMessage::from_row(row)))
+            .map_err(TxtHistoryError::from)?;
 
         // Convert to our Message format
         let mut messages = Vec::new();
@@ -309,7 +311,8 @@ impl MessageRepository for IMessageDatabaseRepo {
                 if let Some(text) = msg.text {
                     // Apply date filter if provided
                     if let Some(start) = &date_range.start {
-                        // msg.date is i64 (timestamp in nanoseconds), convert to DateTime for comparison
+                        // msg.date is i64 (timestamp in nanoseconds), convert to DateTime for
+                        // comparison
                         let msg_date = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
                             .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
                         if msg_date < *start {
@@ -333,11 +336,11 @@ impl MessageRepository for IMessageDatabaseRepo {
                         continue;
                     }
 
-// Convert date (msg.date is i64 timestamp in nanoseconds)
-let seconds = msg.date / 1_000_000_000;
-let nanoseconds = (msg.date % 1_000_000_000) as u32;
-let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
-    .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
+                    // Convert date (msg.date is i64 timestamp in nanoseconds)
+                    let seconds = msg.date / 1_000_000_000;
+                    let nanoseconds = (msg.date % 1_000_000_000) as u32;
+                    let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
+                        .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
                     let timestamp = msg_date_time.with_timezone(&Local);
                     let msg_date = msg_date_time.naive_utc();
 
@@ -379,8 +382,9 @@ let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
     }
 
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
-        // Use shared file writer - note: this is synchronous but we keep async signature
-        // for trait compatibility. Consider making this sync or using tokio::fs.
+        // Use shared file writer - note: this is synchronous but we keep async
+        // signature for trait compatibility. Consider making this sync or using
+        // tokio::fs.
         write_messages_to_file(messages, format, path)
     }
 
@@ -408,7 +412,7 @@ let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
 
         // Create output files
         let mut output_files = Vec::new();
-        
+
         // Use shared chunking utilities
         let chunks = if let Some(size) = chunk_size {
             chunk_by_size(&messages, size)
@@ -422,7 +426,7 @@ let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
         for (i, chunk) in chunks.iter().enumerate() {
             let file_name = format!("chunk_{}.{}", i + 1, format.extension());
             let file_path = output_path.join(file_name);
-            
+
             self.save_messages(chunk, format, &file_path).await?;
             output_files.push(file_path);
         }

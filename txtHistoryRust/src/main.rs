@@ -1,24 +1,27 @@
 mod db;
+mod error;
+mod file_writer;
 mod models;
 mod nlp;
 mod repository;
 mod schema;
-mod error;
-mod file_writer;
 mod utils;
 
-use crate::error::{Result, TxtHistoryError};
+use std::path::PathBuf;
+
 use chrono::{DateTime, Local};
 use clap::{Parser, Subcommand};
 use imessage_database::util::dirs;
-use crate::repository::IMessageDatabaseRepo;
-use std::path::PathBuf;
 
-use crate::db::Database;
-use crate::models::{Contact, DateRange, OutputFormat};
-use crate::nlp::NlpProcessor;
-use crate::file_writer::{write_messages_to_file, write_messages_to_timestamped_dir};
-use crate::utils::{chunk_by_size, chunk_by_lines};
+use crate::{
+    db::Database,
+    error::{Result, TxtHistoryError},
+    file_writer::{write_messages_to_file, write_messages_to_timestamped_dir},
+    models::{Contact, DateRange, OutputFormat},
+    nlp::NlpProcessor,
+    repository::IMessageDatabaseRepo,
+    utils::{chunk_by_lines, chunk_by_size},
+};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -195,17 +198,12 @@ async fn main() -> Result<()> {
 
 /// Import messages from iMessage database (matches Python script behavior)
 async fn import_messages(
-    name: &str,
-    date: &Option<String>,
-    end_date: &Option<String>,
-    size: Option<f64>,
-    lines: Option<usize>,
-    output_dir: Option<&str>,
+    name: &str, date: &Option<String>, end_date: &Option<String>, size: Option<f64>, lines: Option<usize>, output_dir: Option<&str>,
     only_contact: bool,
 ) -> Result<()> {
     // Get iMessage database path
-    let chat_db_path = dirs::get_chat_db()
-        .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to locate iMessage database: {}", e)))?;
+    let chat_db_path =
+        dirs::get_chat_db().map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to locate iMessage database: {}", e)))?;
 
     println!("Using iMessage database at: {}", chat_db_path.display());
 
@@ -221,10 +219,10 @@ async fn import_messages(
     // Fetch messages
     println!("Fetching messages for contact: {}", contact.name);
     let mut messages = repo.fetch_messages(&contact, &date_range, only_contact).await?;
-    
+
     // Ensure messages are sorted chronologically (ascending)
     messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-    
+
     println!("Found {} messages", messages.len());
 
     if messages.is_empty() {
@@ -233,9 +231,7 @@ async fn import_messages(
     }
 
     // Determine output directory
-    let output_path = output_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("./output"));
+    let output_path = output_dir.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("./output"));
 
     // Generate timestamp for directory structure
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
@@ -255,7 +251,7 @@ async fn import_messages(
     let mut all_files = Vec::new();
     for (i, chunk) in chunks.iter().enumerate() {
         let chunk_num = i + 1;
-        
+
         // Write TXT format
         let txt_dir = output_path.join(&timestamp).join("chunks_txt");
         std::fs::create_dir_all(&txt_dir)?;
@@ -422,7 +418,8 @@ fn process_messages(
 /// Get contact information by name
 fn get_contact_info(name: &str) -> Result<Contact> {
     // For now, we'll just create a contact with the given name
-    // TODO: Implement contact store with JSON persistence (like Python's ContactStore)
+    // TODO: Implement contact store with JSON persistence (like Python's
+    // ContactStore)
     let contact = match name {
         "Jess" => Contact {
             name: "Jess".to_string(),
@@ -482,10 +479,14 @@ fn parse_date_range(start_date: &Option<String>, end_date: &Option<String>) -> R
         None
     };
 
-    Ok(DateRange { start, end })
+    Ok(DateRange {
+        start,
+        end,
+    })
 }
 
-/// Write messages to files with chunking (legacy function, kept for compatibility)
+/// Write messages to files with chunking (legacy function, kept for
+/// compatibility)
 fn write_messages_to_files(
     messages: &[crate::models::Message], format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>, output_dir: &str,
 ) -> Result<()> {
@@ -534,4 +535,3 @@ fn write_messages_to_files(
 
     Ok(())
 }
-
