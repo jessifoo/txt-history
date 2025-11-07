@@ -49,9 +49,9 @@ impl MessageRepository for Repository {
         // Get messages from database (already returns Vec<Message>)
         let mut messages = self.db.get_messages_by_contact_name(&contact.name, date_range)?;
 
-        // Filter out local (from-me) messages if only_contact is true
+        // Filter out "Jess" messages if only_contact is true
         if only_contact {
-            messages.retain(|m| !m.is_from_me);
+            messages.retain(|m| m.sender != "Jess");
         }
 
         // Ensure messages are sorted chronologically
@@ -296,8 +296,10 @@ impl MessageRepository for IMessageDatabaseRepo {
 
         // Convert to our Message format
         let mut messages = Vec::new();
-        let me_contact = self.database.get_contact("Jess")?.unwrap();
-        let db_contact = self.database.get_contact(&contact.name)?.unwrap();
+        let me_contact = self.database.get_contact("Jess")?
+            .ok_or_else(|| TxtHistoryError::ContactNotFound("Jess".to_string()))?;
+        let db_contact = self.database.get_contact(&contact.name)?
+            .ok_or_else(|| TxtHistoryError::ContactNotFound(contact.name.clone()))?;
 
         for message_result in message_results {
             if let Ok(imessage) = message_result {
@@ -313,7 +315,9 @@ impl MessageRepository for IMessageDatabaseRepo {
                     if let Some(start) = &date_range.start {
                         // msg.date is i64 (timestamp in nanoseconds), convert to DateTime for
                         // comparison
-                        let msg_date = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
+                        let seconds = msg.date / 1_000_000_000;
+                        let nanoseconds = (msg.date % 1_000_000_000) as u32;
+                        let msg_date = DateTime::from_timestamp(seconds, nanoseconds)
                             .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
                         if msg_date < *start {
                             continue;
@@ -321,7 +325,9 @@ impl MessageRepository for IMessageDatabaseRepo {
                     }
 
                     if let Some(end) = &date_range.end {
-                        let msg_date = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
+                        let seconds = msg.date / 1_000_000_000;
+                        let nanoseconds = (msg.date % 1_000_000_000) as u32;
+                        let msg_date = DateTime::from_timestamp(seconds, nanoseconds)
                             .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
                         if msg_date > *end {
                             continue;
