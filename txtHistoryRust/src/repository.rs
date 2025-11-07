@@ -18,11 +18,11 @@ use crate::utils::{chunk_by_size, chunk_by_lines};
 /// Repository trait for interacting with message data
 #[async_trait]
 pub trait MessageRepository {
-    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>>;
+    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange, only_contact: bool) -> Result<Vec<Message>>;
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()>;
     async fn export_conversation_by_person(
-        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<usize>,
-        lines_per_chunk: Option<usize>,
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
+        lines_per_chunk: Option<usize>, only_contact: bool,
     ) -> Result<Vec<PathBuf>>;
 }
 
@@ -36,51 +36,71 @@ impl Repository {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
+}
 
-    /// Export conversation with a specific person
-    pub async fn export_conversation_by_person(
-        &self, person_name: &str, date_range: &DateRange, format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>,
-        output_path: &Path,
+#[async_trait]
+impl MessageRepository for Repository {
+    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange, only_contact: bool) -> Result<Vec<Message>> {
+        // Get messages from database (already returns Vec<Message>)
+        let mut messages = self.db.get_messages_by_contact_name(&contact.name, date_range)?;
+        
+        // Filter out "Jess" messages if only_contact is true
+        if only_contact {
+            messages.retain(|m| m.sender != "Jess");
+        }
+        
+        // Ensure messages are sorted chronologically
+        messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        
+        Ok(messages)
+    }
+
+    async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
+        write_messages_to_file(messages, format, path)
+    }
+
+    async fn export_conversation_by_person(
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
+        lines_per_chunk: Option<usize>, only_contact: bool,
     ) -> Result<Vec<PathBuf>> {
-        // Get messages for the person
-        let db_messages = self.db.get_messages_by_contact_name(person_name, date_range)?;
+        // Get contact
+        let contact = match self.db.get_contact(person_name)? {
+            Some(c) => Contact {
+                name: c.name,
+                phone: c.phone,
+                email: c.email,
+            },
+            None => return Err(TxtHistoryError::ContactNotFound(person_name.to_string())),
+        };
 
-        if db_messages.is_empty() {
-            println!("No messages found for {} in the specified date range", person_name);
+        // Fetch messages
+        let messages = self.fetch_messages(&contact, date_range, only_contact).await?;
+
+        if messages.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Chunk messages based on size or line count
-        let chunks = if let Some(size) = size_mb {
-            chunk_by_size(&db_messages, size)
+        // Use shared chunking utilities
+        let chunks = if let Some(size) = chunk_size {
+            chunk_by_size(&messages, size)
         } else if let Some(lines) = lines_per_chunk {
-            chunk_by_lines(&db_messages, lines)
+            chunk_by_lines(&messages, lines)
         } else {
-            vec![db_messages] // No chunking
+            vec![messages] // No chunking
         };
 
         let mut output_files = Vec::new();
 
+        // Save each chunk
         for (i, chunk) in chunks.iter().enumerate() {
-            // Create output file path
             let file_name = format!("chunk_{}.{}", i + 1, format.extension());
             let file_path = output_path.join(file_name);
-
-            // Save messages to file
+            
             self.save_messages(chunk, format, &file_path).await?;
-
-            // Add to output files
             output_files.push(file_path);
         }
 
         Ok(output_files)
-    }
-
-    /// Save messages to a file in the specified format
-    async fn save_messages(&self, messages: &[Message], format: OutputFormat, file_path: &Path) -> Result<()> {
-        // Use shared file writer - note: this is synchronous but we keep async signature
-        // for trait compatibility. Consider making this sync or using tokio::fs.
-        write_messages_to_file(messages, format, file_path)
     }
 }
 
@@ -246,7 +266,7 @@ impl IMessageDatabaseRepo {
 
 #[async_trait]
 impl MessageRepository for IMessageDatabaseRepo {
-    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>> {
+    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange, only_contact: bool) -> Result<Vec<Message>> {
         // Find handle for the contact
         let handle = match self.find_handle(contact).await? {
             Some(h) => h,
@@ -308,6 +328,11 @@ impl MessageRepository for IMessageDatabaseRepo {
                     // Determine sender name
                     let sender = if msg.is_from_me { "Jess".to_string() } else { contact.name.clone() };
 
+                    // Filter out "Jess" messages if only_contact is true
+                    if only_contact && sender == "Jess" {
+                        continue;
+                    }
+
                     // Convert date (msg.date is i64 timestamp in nanoseconds)
                     let msg_date_time = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
                         .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
@@ -358,8 +383,8 @@ impl MessageRepository for IMessageDatabaseRepo {
     }
 
     async fn export_conversation_by_person(
-        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<usize>,
-        lines_per_chunk: Option<usize>,
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
+        lines_per_chunk: Option<usize>, only_contact: bool,
     ) -> Result<Vec<PathBuf>> {
         // Get contact by name
         let contact = match self.database.get_contact(person_name)? {
@@ -372,7 +397,7 @@ impl MessageRepository for IMessageDatabaseRepo {
         };
 
         // Fetch messages
-        let messages = self.fetch_messages(&contact, date_range).await?;
+        let messages = self.fetch_messages(&contact, date_range, only_contact).await?;
 
         // If no messages, return early
         if messages.is_empty() {
@@ -382,58 +407,21 @@ impl MessageRepository for IMessageDatabaseRepo {
         // Create output files
         let mut output_files = Vec::new();
         
-        // Determine chunking strategy and save each chunk
-        if let Some(lines) = lines_per_chunk {
-            // Chunk by line count
-            for (i, chunk) in messages.chunks(lines).enumerate() {
-                let file_name = format!("chunk_{}.{}", i + 1, format.extension());
-                let file_path = output_path.join(file_name);
-                
-                self.save_messages(chunk, format, &file_path).await?;
-                output_files.push(file_path);
-            }
-        } else if let Some(size) = chunk_size {
-            // Chunk by approximate size (in bytes)
-            let mut current_chunk = Vec::new();
-            let mut current_size = 0;
-            let mut chunk_index = 1;
-
-            for message in &messages {
-                // Estimate message size (very rough approximation)
-                let message_size = message.sender.len() + message.content.len() + 50; // 50 for timestamp and formatting
-
-                if current_size + message_size > size * 1024 * 1024 && !current_chunk.is_empty() {
-                    // Save the current chunk
-                    let file_name = format!("chunk_{}.{}", chunk_index, format.extension());
-                    let file_path = output_path.join(file_name);
-                    
-                    self.save_messages(&current_chunk, format, &file_path).await?;
-                    output_files.push(file_path);
-                    
-                    // Start a new chunk
-                    current_chunk = Vec::new();
-                    current_size = 0;
-                    chunk_index += 1;
-                }
-
-                current_chunk.push(message.clone());
-                current_size += message_size;
-            }
-
-            // Save the last chunk if not empty
-            if !current_chunk.is_empty() {
-                let file_name = format!("chunk_{}.{}", chunk_index, format.extension());
-                let file_path = output_path.join(file_name);
-                
-                self.save_messages(&current_chunk, format, &file_path).await?;
-                output_files.push(file_path);
-            }
+        // Use shared chunking utilities
+        let chunks = if let Some(size) = chunk_size {
+            chunk_by_size(&messages, size)
+        } else if let Some(lines) = lines_per_chunk {
+            chunk_by_lines(&messages, lines)
         } else {
-            // No chunking, just one file with all messages
-            let file_name = format!("conversation.{}", format.extension());
+            vec![messages] // No chunking
+        };
+
+        // Save each chunk
+        for (i, chunk) in chunks.iter().enumerate() {
+            let file_name = format!("chunk_{}.{}", i + 1, format.extension());
             let file_path = output_path.join(file_name);
             
-            self.save_messages(&messages, format, &file_path).await?;
+            self.save_messages(chunk, format, &file_path).await?;
             output_files.push(file_path);
         }
 
