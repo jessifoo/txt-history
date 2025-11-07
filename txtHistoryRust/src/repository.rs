@@ -49,9 +49,9 @@ impl MessageRepository for Repository {
         // Get messages from database (already returns Vec<Message>)
         let mut messages = self.db.get_messages_by_contact_name(&contact.name, date_range)?;
 
-        // Filter out "Jess" messages if only_contact is true
+        // Filter out local (from-me) messages if only_contact is true
         if only_contact {
-            messages.retain(|m| m.sender != "Jess");
+            messages.retain(|m| !m.is_from_me);
         }
 
         // Ensure messages are sorted chronologically
