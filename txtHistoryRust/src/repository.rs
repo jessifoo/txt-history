@@ -333,9 +333,11 @@ impl MessageRepository for IMessageDatabaseRepo {
                         continue;
                     }
 
-                    // Convert date (msg.date is i64 timestamp in nanoseconds)
-                    let msg_date_time = DateTime::from_timestamp(msg.date / 1_000_000_000, ((msg.date % 1_000_000_000) as u32) * 1_000_000)
-                        .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
+// Convert date (msg.date is i64 timestamp in nanoseconds)
+let seconds = msg.date / 1_000_000_000;
+let nanoseconds = (msg.date % 1_000_000_000) as u32;
+let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
+    .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
                     let timestamp = msg_date_time.with_timezone(&Local);
                     let msg_date = msg_date_time.naive_utc();
 
