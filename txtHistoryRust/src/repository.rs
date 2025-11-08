@@ -134,11 +134,13 @@ impl IMessageDatabaseRepo {
         })
     }
 
-    // Helper method to find a handle by phone or email
-    async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
+    // Helper method to find all handles for a contact (phone and email)
+    async fn find_all_handles(&self, contact: &Contact) -> Result<Vec<Handle>> {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path)
             .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
+
+        let mut handles = Vec::new();
 
         // Try to find by phone first using SQL query
         if let Some(phone) = &contact.phone {
@@ -153,9 +155,13 @@ impl IMessageDatabaseRepo {
 
             for handle_result in handle_results {
                 if let Ok(handle) = handle_result {
-                    let extracted = Handle::extract(Ok(handle))
-                        .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract handle: {}", e)))?;
-                    return Ok(Some(extracted));
+                    match Handle::extract(Ok(handle)) {
+                        Ok(extracted) => handles.push(extracted),
+                        Err(e) => {
+                            // Log but continue - don't fail on extraction errors
+                            eprintln!("Warning: Failed to extract handle: {}", e);
+                        }
+                    }
                 }
             }
         }
@@ -169,24 +175,37 @@ impl IMessageDatabaseRepo {
 
             for handle_result in handle_results {
                 if let Ok(handle) = handle_result {
-                    let extracted = Handle::extract(Ok(handle))
-                        .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract handle: {}", e)))?;
-                    return Ok(Some(extracted));
+                    match Handle::extract(Ok(handle)) {
+                        Ok(extracted) => {
+                            // Avoid duplicates (same handle might be found by phone and email)
+                            if !handles.iter().any(|h| h.rowid == extracted.rowid) {
+                                handles.push(extracted);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: Failed to extract handle: {}", e);
+                        }
+                    }
                 }
             }
         }
 
-        // No handle found
-        Ok(None)
+        Ok(handles)
     }
 
-    // Helper method to find a chat by handle
-    async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
+    // Helper method to find a handle by phone or email (kept for backward compatibility)
+    async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
+        let handles = self.find_all_handles(contact).await?;
+        Ok(handles.into_iter().next())
+    }
+
+    // Helper method to find all chats for a handle
+    async fn find_all_chats_by_handle(&self, handle: &Handle) -> Result<Vec<Chat>> {
         // Create a connection to the iMessage database
         let db = get_connection(&self.db_path)
             .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
 
-        // Query for chats with this handle using SQL
+        // Query for all chats with this handle using SQL
         let mut stmt = db
             .prepare("SELECT * FROM chat WHERE ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id = ?)")
             .map_err(TxtHistoryError::from)?;
@@ -194,16 +213,25 @@ impl IMessageDatabaseRepo {
             .query_map(rusqlite::params![handle.rowid], |row| Ok(Chat::from_row(row)))
             .map_err(TxtHistoryError::from)?;
 
-        // Return the first chat found
+        let mut result = Vec::new();
         for chat_result in chats {
             if let Ok(chat) = chat_result {
-                return Ok(Some(Chat::extract(Ok(chat)).map_err(|e| {
-                    TxtHistoryError::IMessageDatabase(format!("Failed to extract chat: {}", e))
-                })?));
+                match Chat::extract(Ok(chat)) {
+                    Ok(extracted) => result.push(extracted),
+                    Err(e) => {
+                        eprintln!("Warning: Failed to extract chat: {}", e);
+                    }
+                }
             }
         }
 
-        Ok(None)
+        Ok(result)
+    }
+
+    // Helper method to find a chat by handle (kept for backward compatibility)
+    async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
+        let chats = self.find_all_chats_by_handle(handle).await?;
+        Ok(chats.into_iter().next())
     }
 
     // Get messages for a chat
@@ -270,31 +298,48 @@ impl IMessageDatabaseRepo {
 #[async_trait]
 impl MessageRepository for IMessageDatabaseRepo {
     async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange, only_contact: bool) -> Result<Vec<Message>> {
-        // Find handle for the contact
-        let handle = match self.find_handle(contact).await? {
-            Some(h) => h,
-            None => return Err(TxtHistoryError::HandleNotFound(contact.name.clone())),
-        };
+        // Find all handles for the contact (phone and email)
+        let handles = self.find_all_handles(contact).await?;
+        if handles.is_empty() {
+            return Err(TxtHistoryError::HandleNotFound(contact.name.clone()));
+        }
 
-        // Find chat for the handle
-        let chat = match self.find_chat_by_handle(&handle).await? {
-            Some(c) => c,
-            None => return Err(TxtHistoryError::ChatNotFound(contact.name.clone())),
-        };
+        // Find all chats for all handles
+        let mut all_chats = Vec::new();
+        for handle in &handles {
+            let chats = self.find_all_chats_by_handle(handle).await?;
+            all_chats.extend(chats);
+        }
 
-        // Create a connection to the iMessage database
+        if all_chats.is_empty() {
+            return Err(TxtHistoryError::ChatNotFound(contact.name.clone()));
+        }
+
+        // Create a connection to the iMessage database (reuse for all queries)
         let db = get_connection(&self.db_path)
             .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
 
-        // Get messages for this chat using SQL query
-        let mut stmt = db
-            .prepare("SELECT * FROM message WHERE ROWID IN (SELECT message_id FROM chat_message_join WHERE chat_id = ?) ORDER BY date ASC")
-            .map_err(TxtHistoryError::from)?;
-        let message_results = stmt
-            .query_map(rusqlite::params![chat.rowid], |row| Ok(ImessageMessage::from_row(row)))
-            .map_err(TxtHistoryError::from)?;
+        // Collect all messages from all chats efficiently
+        // Query each chat and collect all message rows
+        let mut all_message_rows = Vec::new();
 
-        // Convert to our Message format
+        for chat in &all_chats {
+            let mut stmt = db
+                .prepare("SELECT * FROM message WHERE ROWID IN (SELECT message_id FROM chat_message_join WHERE chat_id = ?) ORDER BY date ASC")
+                .map_err(TxtHistoryError::from)?;
+            let message_results = stmt
+                .query_map(rusqlite::params![chat.rowid], |row| Ok(ImessageMessage::from_row(row)))
+                .map_err(TxtHistoryError::from)?;
+
+            // Collect all results from this chat
+            for result in message_results {
+                all_message_rows.push(result);
+            }
+        }
+
+        // Convert to our Message format, deduplicating by GUID
+        use std::collections::HashSet;
+        let mut seen_guids = HashSet::new();
         let mut messages = Vec::new();
 
         // Ensure contacts exist in database (create if they don't)
@@ -326,10 +371,18 @@ impl MessageRepository for IMessageDatabaseRepo {
             },
         };
 
-        for message_result in message_results {
+        // Use the first handle for linking (all handles are for the same contact)
+        let primary_handle = &handles[0];
+
+        for message_result in all_message_rows {
             if let Ok(imessage) = message_result {
                 let mut msg = ImessageMessage::extract(Ok(imessage))
                     .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract message: {}", e)))?;
+
+                // Deduplicate by GUID (in case message appears in multiple chats)
+                if !seen_guids.insert(msg.guid.clone()) {
+                    continue; // Skip duplicate message
+                }
 
                 // Generate text content
                 msg.generate_text(&db);
@@ -375,9 +428,9 @@ impl MessageRepository for IMessageDatabaseRepo {
                         is_from_me: msg.is_from_me,
                         date_created: msg_date,
                         date_imported: None, // Will default to current time
-                        handle_id: Some(handle.id.clone()),
+                        handle_id: Some(primary_handle.id.clone()),
                         service: msg.service.clone(),
-                        thread_id: Some(chat.chat_identifier.clone()),
+                        thread_id: Some(all_chats[0].chat_identifier.clone()), // Use first chat's identifier
                         has_attachments: false, // Simplified for now
                         contact_id: Some(if msg.is_from_me {
                             db_contact.id // Link to the recipient (the other person)
@@ -401,7 +454,7 @@ impl MessageRepository for IMessageDatabaseRepo {
             }
         }
 
-        // Ensure messages are sorted chronologically after filtering
+        // Ensure messages are sorted chronologically after merging from all chats
         messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
 
         Ok(messages)
