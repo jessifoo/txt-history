@@ -18,7 +18,7 @@ rust_tokenizers = "8.1.1" # rust_tokenizers has had some API changes; check befo
 serde = { version = "1.0", features = ["derive"] } # serde 1.0 is widely used.
 serde_json = "1.0"  # serde_json 1.0 is the standard
 stop-words = "0.8.1"  # stop-words is relatively stable.  Check if a newer version adds any necessary languages.
-tokio = { version = "1.35", features = ["full"] } # tokio is regularly updated.  1.35 is the latest at the time of writing
+tokio = { version = "1.35", features = ["full"] } # tokio is regularly updated.  1.44 is the latest at the time of writing
 unicode-normalization = "0.1.22" # unicode-normalization is quite stable
 whatlang = "0.16.2" # whatlang is also fairly stable
 async-trait = "0.1" # async-trait 0.1 is still widely used.
