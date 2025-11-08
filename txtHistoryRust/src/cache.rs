@@ -1,5 +1,5 @@
 use crate::models::{Contact, DateRange, Message};
-use anyhow::{Context, Result};
+use crate::error::{Result, TxtHistoryError};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -23,7 +23,7 @@ impl MessageCache {
         std::fs::create_dir_all(&cache_dir)?;
         
         let db = sled::open(&cache_dir)
-            .context("Failed to open cache database")?;
+            .map_err(|e| TxtHistoryError::Cache(format!("Failed to open cache database: {}", e)))?;
         
         Ok(Self { db })
     }

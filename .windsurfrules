@@ -1,18 +1,18 @@
-This is a script: format_txt_history_full.py which runs on cli 
+This is a script: scripts/format_txts.py which runs on cli
 it automatically spins up a venv and installs requirements.py
-it cleans up the venv at the end 
+it cleans up the venv at the end
 
 it is run by
 
 ```Bash
-python3 format_txt_history_full.py -s 0.5 -d "2024-01-01" -l 500 -n "Robert"
-
+poetry run format -s 0.5 -d "2024-01-01"
 -s: size (mb) per chunk
 -d: date
 -l: lines per chunk (this or -s, not both)
 -n: name
 
 ```
+
 All are optional and if none are supplied only the name "Phil" is used by default
 
 This means it will lool up phil's phone number and then search imessage_exporter by using both his phone number and his email
@@ -27,6 +27,7 @@ and a csv file of the same name with no line spacing
 example
 
 chunk_1.txt
+
 ```Bash
 
 Phil, Jan 20, 2025 12:21:19 PM, Yea, I’ll have to go to bed earlier

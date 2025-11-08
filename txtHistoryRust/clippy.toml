@@ -1,0 +1,15 @@
+# Clippy configuration - thresholds and options
+
+# Complexity thresholds
+cognitive-complexity-threshold = 15
+type-complexity-threshold = 250
+too-many-arguments-threshold = 5
+too-many-lines-threshold = 100
+
+# Test-related configurations
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+
+# Documentation options
+doc-valid-idents = ["RustFmt", "NLP", "iMessage", "CSV", "TXT"]

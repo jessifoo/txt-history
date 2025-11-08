@@ -162,9 +162,8 @@ cython_debug/
 .snapshots
 .idea
 .ruff_cache
-.vscode/
 output/
-
+/scripts/contacts.json
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

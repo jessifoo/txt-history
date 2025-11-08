@@ -1,93 +1,254 @@
 use std::path::{Path, PathBuf};
-use anyhow::Result;
+
 use async_trait::async_trait;
-use chrono::{Local, TimeZone};
-use imessage_database::{
-    tables::{
-        chat::Chat,
-        handle::Handle,
-        message::Message as ImessageMessage,
-    },
-    IMessageChat, IMessageDb,
+use chrono::{DateTime, Local};
+use imessage_database::tables::{
+    chat::Chat,
+    handle::Handle,
+    messages::Message as ImessageMessage,
+    table::{Table, get_connection},
+};
+use rusqlite;
+
+use crate::{
+    db::Database,
+    error::{Result, TxtHistoryError},
+    file_writer::write_messages_to_file,
+    models::{Contact, DateRange, Message, NewMessage, OutputFormat},
+    utils::{chunk_by_lines, chunk_by_size},
 };
 
-use crate::models::{Contact, DateRange, Message, OutputFormat};
-
+/// Repository trait for interacting with message data
 #[async_trait]
 pub trait MessageRepository {
-    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>>;
+    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange, only_contact: bool) -> Result<Vec<Message>>;
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()>;
     async fn export_conversation_by_person(
-        &self,
-        person_name: &str,
-        format: OutputFormat,
-        output_path: &Path,
-        date_range: &DateRange,
-        chunk_size: Option<usize>,
-        lines_per_chunk: Option<usize>
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
+        lines_per_chunk: Option<usize>, only_contact: bool,
     ) -> Result<Vec<PathBuf>>;
 }
 
+/// Repository for interacting with the database
+pub struct Repository {
+    db: Database,
+}
+
+impl Repository {
+    /// Create a new repository
+    pub fn new(db: Database) -> Self {
+        Self {
+            db,
+        }
+    }
+}
+
+#[async_trait]
+impl MessageRepository for Repository {
+    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange, only_contact: bool) -> Result<Vec<Message>> {
+        // Get messages from database (already returns Vec<Message>)
+        let mut messages = self.db.get_messages_by_contact_name(&contact.name, date_range)?;
+
+        // Filter out "Jess" messages if only_contact is true
+        if only_contact {
+            messages.retain(|m| m.sender != "Jess");
+        }
+
+        // Ensure messages are sorted chronologically
+        messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
+        Ok(messages)
+    }
+
+    async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
+        write_messages_to_file(messages, format, path)
+    }
+
+    async fn export_conversation_by_person(
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
+        lines_per_chunk: Option<usize>, only_contact: bool,
+    ) -> Result<Vec<PathBuf>> {
+        // Get contact
+        let contact = match self.db.get_contact(person_name)? {
+            Some(c) => Contact {
+                name: c.name,
+                phone: c.phone,
+                email: c.email,
+            },
+            None => return Err(TxtHistoryError::ContactNotFound(person_name.to_string())),
+        };
+
+        // Fetch messages
+        let messages = self.fetch_messages(&contact, date_range, only_contact).await?;
+
+        if messages.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Use shared chunking utilities
+        let chunks = if let Some(size) = chunk_size {
+            chunk_by_size(&messages, size)
+        } else if let Some(lines) = lines_per_chunk {
+            chunk_by_lines(&messages, lines)
+        } else {
+            vec![messages] // No chunking
+        };
+
+        let mut output_files = Vec::new();
+
+        // Save each chunk
+        for (i, chunk) in chunks.iter().enumerate() {
+            let file_name = format!("chunk_{}.{}", i + 1, format.extension());
+            let file_path = output_path.join(file_name);
+
+            self.save_messages(chunk, format, &file_path).await?;
+            output_files.push(file_path);
+        }
+
+        Ok(output_files)
+    }
+}
+
+/// Repository for interacting with the iMessage database
 pub struct IMessageDatabaseRepo {
-    db: IMessageDb,
+    db_path: PathBuf,
     database: Database,
 }
 
 impl IMessageDatabaseRepo {
     pub fn new(chat_db_path: PathBuf) -> Result<Self> {
-        // Initialize iMessage database
-        let db = IMessageDb::new(chat_db_path)
-            .map_err(|e| anyhow::anyhow!("Failed to initialize iMessage database: {}", e))?;
+        // Validate that the path exists
+        if !chat_db_path.exists() {
+            return Err(TxtHistoryError::IMessageDatabase(format!(
+                "iMessage database path does not exist: {:?}",
+                chat_db_path
+            )));
+        }
 
         // Initialize our database
         let database = Database::new("sqlite:data/messages.db")?;
 
-        Ok(Self { db, database })
+        Ok(Self {
+            db_path: chat_db_path,
+            database,
+        })
     }
 
-    // Helper method to find a handle by phone or email
-    async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
-        // Try to find by phone first
-        if let Some(phone) = &contact.phone {
-            let handle = self
-                .db
-                .get_handle_by_id(phone)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to get handle by phone: {}", e))?;
+    // Helper method to find all handles for a contact (phone and email)
+    async fn find_all_handles(&self, contact: &Contact) -> Result<Vec<Handle>> {
+        // Create a connection to the iMessage database
+        let db = get_connection(&self.db_path)
+            .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
 
-            if handle.is_some() {
-                return Ok(handle);
+        let mut handles = Vec::new();
+
+        // Try to find by phone first using SQL query
+        if let Some(phone) = &contact.phone {
+            let mut stmt = db
+                .prepare("SELECT * FROM handle WHERE id = ?1 OR id = ?2")
+                .map_err(TxtHistoryError::from)?;
+            let handle_results = stmt
+                .query_map(rusqlite::params![phone, format!("+{}", phone.trim_start_matches('+'))], |row| {
+                    Ok(Handle::from_row(row))
+                })
+                .map_err(TxtHistoryError::from)?;
+
+            for handle_result in handle_results {
+                if let Ok(handle) = handle_result {
+                    match Handle::extract(Ok(handle)) {
+                        Ok(extracted) => handles.push(extracted),
+                        Err(e) => {
+                            // Log but continue - don't fail on extraction errors
+                            eprintln!("Warning: Failed to extract handle: {}", e);
+                        }
+                    }
+                }
             }
         }
 
         // Then try by email
         if let Some(email) = &contact.email {
-            let handle = self
-                .db
-                .get_handle_by_id(email)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to get handle by email: {}", e))?;
+            let mut stmt = db.prepare("SELECT * FROM handle WHERE id = ?").map_err(TxtHistoryError::from)?;
+            let handle_results = stmt
+                .query_map(rusqlite::params![email], |row| Ok(Handle::from_row(row)))
+                .map_err(TxtHistoryError::from)?;
 
-            return Ok(handle);
+            for handle_result in handle_results {
+                if let Ok(handle) = handle_result {
+                    match Handle::extract(Ok(handle)) {
+                        Ok(extracted) => {
+                            // Avoid duplicates (same handle might be found by phone and email)
+                            if !handles.iter().any(|h| h.rowid == extracted.rowid) {
+                                handles.push(extracted);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: Failed to extract handle: {}", e);
+                        }
+                    }
+                }
+            }
         }
 
-        // No handle found
-        Ok(None)
+        Ok(handles)
     }
 
-    // Helper method to find a chat by handle
-    async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
-        let chats = self
-            .db
-            .get_chats_by_handle_id(handle.rowid)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to get chats by handle: {}", e))?;
+    // Helper method to find a handle by phone or email (kept for backward compatibility)
+    async fn find_handle(&self, contact: &Contact) -> Result<Option<Handle>> {
+        let handles = self.find_all_handles(contact).await?;
+        Ok(handles.into_iter().next())
+    }
 
-        // Just return the first chat for now
+    // Helper method to find all chats for a handle
+    async fn find_all_chats_by_handle(&self, handle: &Handle) -> Result<Vec<Chat>> {
+        // Create a connection to the iMessage database
+        let db = get_connection(&self.db_path)
+            .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
+
+        // Query for all chats with this handle using SQL
+        let mut stmt = db
+            .prepare("SELECT * FROM chat WHERE ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id = ?)")
+            .map_err(TxtHistoryError::from)?;
+        let chats = stmt
+            .query_map(rusqlite::params![handle.rowid], |row| Ok(Chat::from_row(row)))
+            .map_err(TxtHistoryError::from)?;
+
+        let mut result = Vec::new();
+        for chat_result in chats {
+            if let Ok(chat) = chat_result {
+                match Chat::extract(Ok(chat)) {
+                    Ok(extracted) => result.push(extracted),
+                    Err(e) => {
+                        eprintln!("Warning: Failed to extract chat: {}", e);
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    // Helper method to find a chat by handle (kept for backward compatibility)
+    async fn find_chat_by_handle(&self, handle: &Handle) -> Result<Option<Chat>> {
+        let chats = self.find_all_chats_by_handle(handle).await?;
         Ok(chats.into_iter().next())
     }
 
+    // Get messages for a chat
+    #[allow(dead_code)]
+    async fn get_messages_for_chat(&self, _chat: &Chat) -> Result<Vec<ImessageMessage>> {
+        let _db = get_connection(&self.db_path)
+            .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
+
+        // Try to get messages using chat_identifier
+        let messages = Vec::new();
+        // Note: The API may have changed - this is a placeholder implementation
+        // You may need to adjust based on the actual imessage-database API
+        Ok(messages)
+    }
+
     // Save messages to database
+    #[allow(dead_code)]
     async fn save_to_database(&self, messages: &[Message], contact: &Contact) -> Result<()> {
         // Ensure contact exists in database
         let db_contact = self.database.add_or_update_contact(crate::models::NewContact {
@@ -115,6 +276,7 @@ impl IMessageDatabaseRepo {
                 sender: message.sender.clone(),
                 is_from_me: message.sender == "Jess",
                 date_created: message.timestamp.naive_local(),
+                date_imported: None, // Will default to current time
                 handle_id: None,
                 service: Some("iMessage".to_string()),
                 thread_id: None,
@@ -135,69 +297,147 @@ impl IMessageDatabaseRepo {
 
 #[async_trait]
 impl MessageRepository for IMessageDatabaseRepo {
-    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange) -> Result<Vec<Message>> {
-        // Find handle for the contact
-        let handle = match self.find_handle(contact).await? {
-            Some(h) => h,
-            None => return Err(anyhow::anyhow!("No handle found for contact: {}", contact.name)),
-        };
-
-        // Find chat for the handle
-        let chat = match self.find_chat_by_handle(&handle).await? {
-            Some(c) => c,
-            None => return Err(anyhow::anyhow!("No chat found for contact: {}", contact.name)),
-        };
-
-        // Build query
-        let mut query = QueryBuilder::new();
-
-        // Add chat filter
-        query.add_filter(Filter {
-            field: "message.cache_roomnames".to_string(),
-            operator: Operator::Equal,
-            value: FilterType::Text(chat.chat_identifier.clone()),
-        });
-
-        // Add date filters if provided
-        if let Some(start) = &date_range.start {
-            query.add_filter(Filter {
-                field: "message.date".to_string(),
-                operator: Operator::GreaterThanOrEqual,
-                value: FilterType::Date(start.naive_utc()),
-            });
+    async fn fetch_messages(&self, contact: &Contact, date_range: &DateRange, only_contact: bool) -> Result<Vec<Message>> {
+        // Find all handles for the contact (phone and email)
+        let handles = self.find_all_handles(contact).await?;
+        if handles.is_empty() {
+            return Err(TxtHistoryError::HandleNotFound(contact.name.clone()));
         }
 
-        if let Some(end) = &date_range.end {
-            query.add_filter(Filter {
-                field: "message.date".to_string(),
-                operator: Operator::LessThanOrEqual,
-                value: FilterType::Date(end.naive_utc()),
-            });
+        // Find all chats for all handles
+        let mut all_chats = Vec::new();
+        for handle in &handles {
+            let chats = self.find_all_chats_by_handle(handle).await?;
+            all_chats.extend(chats);
         }
 
-        // Execute query
-        let message_items = self
-            .db
-            .get_messages_by_query(query)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to get messages: {}", e))?;
+        if all_chats.is_empty() {
+            return Err(TxtHistoryError::ChatNotFound(contact.name.clone()));
+        }
 
-        // Convert to our Message format
+        // Create a connection to the iMessage database (reuse for all queries)
+        let db = get_connection(&self.db_path)
+            .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to connect to iMessage database: {}", e)))?;
+
+        // Collect all messages from all chats efficiently
+        // Query each chat and collect all message rows
+        let mut all_message_rows = Vec::new();
+
+        for chat in &all_chats {
+            let mut stmt = db
+                .prepare("SELECT * FROM message WHERE ROWID IN (SELECT message_id FROM chat_message_join WHERE chat_id = ?) ORDER BY date ASC")
+                .map_err(TxtHistoryError::from)?;
+            let message_results = stmt
+                .query_map(rusqlite::params![chat.rowid], |row| Ok(ImessageMessage::from_row(row)))
+                .map_err(TxtHistoryError::from)?;
+
+            // Collect all results from this chat
+            for result in message_results {
+                all_message_rows.push(result);
+            }
+        }
+
+        // Convert to our Message format, deduplicating by GUID
+        use std::collections::HashSet;
+        let mut seen_guids = HashSet::new();
         let mut messages = Vec::new();
 
-        for item in message_items {
-            if let MessageItem::Message(msg) = item {
+        // Ensure contacts exist in database (create if they don't)
+        let me_contact = match self.database.get_contact("Jess")? {
+            Some(c) => c,
+            None => {
+                // Auto-create "Jess" contact if it doesn't exist
+                self.database.add_or_update_contact(crate::models::NewContact {
+                    name: "Jess".to_string(),
+                    phone: None,
+                    email: None,
+                    is_me: true,
+                    primary_identifier: Some("Jess".to_string()),
+                })?
+            },
+        };
+
+        let db_contact = match self.database.get_contact(&contact.name)? {
+            Some(c) => c,
+            None => {
+                // Auto-create contact if it doesn't exist
+                self.database.add_or_update_contact(crate::models::NewContact {
+                    name: contact.name.clone(),
+                    phone: contact.phone.clone(),
+                    email: contact.email.clone(),
+                    is_me: false,
+                    primary_identifier: None,
+                })?
+            },
+        };
+
+        // Use the first handle for linking (all handles are for the same contact)
+        let primary_handle = &handles[0];
+
+        for message_result in all_message_rows {
+            if let Ok(imessage) = message_result {
+                let mut msg = ImessageMessage::extract(Ok(imessage))
+                    .map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to extract message: {}", e)))?;
+
+                // Deduplicate by GUID (in case message appears in multiple chats)
+                if !seen_guids.insert(msg.guid.clone()) {
+                    continue; // Skip duplicate message
+                }
+
+                // Generate text content
+                msg.generate_text(&db);
+
                 // Skip messages without text
                 if let Some(text) = msg.text {
-                    // Determine sender name
-                    let sender = if msg.is_from_me {
-                        "Jess".to_string()
-                    } else {
-                        contact.name.clone()
-                    };
+                    // Convert date once (msg.date is i64 timestamp in nanoseconds)
+                    let seconds = msg.date / 1_000_000_000;
+                    let nanoseconds = (msg.date % 1_000_000_000) as u32;
+                    let msg_date_time = DateTime::from_timestamp(seconds, nanoseconds)
+                        .ok_or_else(|| TxtHistoryError::InvalidDate(format!("Invalid timestamp: {}", msg.date)))?;
 
-                    // Convert date
-                    let timestamp = Local.from_utc_datetime(&msg.date);
+                    // Apply date filter if provided
+                    if let Some(start) = &date_range.start {
+                        if msg_date_time < *start {
+                            continue;
+                        }
+                    }
+
+                    if let Some(end) = &date_range.end {
+                        if msg_date_time > *end {
+                            continue;
+                        }
+                    }
+
+                    // Determine sender name
+                    let sender = if msg.is_from_me { "Jess".to_string() } else { contact.name.clone() };
+
+                    // Filter out "Jess" messages if only_contact is true
+                    if only_contact && sender == "Jess" {
+                        continue;
+                    }
+
+                    // Use the already-converted date
+                    let timestamp = msg_date_time.with_timezone(&Local);
+                    let msg_date = msg_date_time.naive_utc();
+
+                    // Convert to our message format
+                    let new_message = NewMessage {
+                        imessage_id: msg.guid.clone(),
+                        text: Some(text.clone()),
+                        sender: sender.clone(),
+                        is_from_me: msg.is_from_me,
+                        date_created: msg_date,
+                        date_imported: None, // Will default to current time
+                        handle_id: Some(primary_handle.id.clone()),
+                        service: msg.service.clone(),
+                        thread_id: Some(all_chats[0].chat_identifier.clone()), // Use first chat's identifier
+                        has_attachments: false, // Simplified for now
+                        contact_id: Some(if msg.is_from_me {
+                            db_contact.id // Link to the recipient (the other person)
+                        } else {
+                            me_contact.id // Link to me as the recipient
+                        }),
+                    };
 
                     // Create message
                     let message = Message {
@@ -209,177 +449,65 @@ impl MessageRepository for IMessageDatabaseRepo {
                     messages.push(message);
 
                     // Save to database
-                    let new_message = NewMessage {
-                        imessage_id: msg.guid,
-                        text: msg.text,
-                        sender: if msg.is_from_me {
-                            "Jess".to_string()
-                        } else {
-                            contact.name.clone()
-                        },
-                        is_from_me: msg.is_from_me,
-                        date_created: msg.date,
-                        handle_id: Some(handle.id.clone()),
-                        service: msg.service,
-                        thread_id: Some(chat.chat_identifier.clone()),
-                        has_attachments: !msg.attachments.is_empty(),
-                        contact_id: if msg.is_from_me {
-                            Some(me_contact.id)
-                        } else {
-                            Some(db_contact.id)
-                        },
-                    };
-
-                    // Add to database
                     self.database.add_message(new_message)?;
                 }
             }
         }
 
-        // Sort by date
+        // Ensure messages are sorted chronologically after merging from all chats
         messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
 
         Ok(messages)
     }
 
     async fn save_messages(&self, messages: &[Message], format: OutputFormat, path: &Path) -> Result<()> {
-        match format {
-            OutputFormat::Txt => {
-                use std::fs::File;
-                use std::io::{BufWriter, Write};
-
-                let file = File::create(path)?;
-                let mut writer = BufWriter::new(file);
-
-                for message in messages {
-                    writeln!(
-                        writer,
-                        "{}, {}, {}\n",
-                        message.sender,
-                        message.timestamp.format("%b %d, %Y %r"),
-                        message.content
-                    )?;
-                }
-            }
-            OutputFormat::Csv => {
-                let file = std::fs::File::create(path)?;
-                let mut writer = csv::Writer::from_writer(file);
-
-                // Write header
-                writer.write_record(&["Sender", "Timestamp", "Content"])?;
-
-                // Write data
-                for message in messages {
-                    writer.write_record(&[
-                        &message.sender,
-                        &message.timestamp.format("%b %d, %Y %r").to_string(),
-                        &message.content,
-                    ])?;
-                }
-
-                writer.flush()?;
-            }
-        }
-
-        Ok(())
+        // Use shared file writer - note: this is synchronous but we keep async
+        // signature for trait compatibility. Consider making this sync or using
+        // tokio::fs.
+        write_messages_to_file(messages, format, path)
     }
 
-    // Export conversation with a person in the specified format
     async fn export_conversation_by_person(
-        &self,
-        person_name: &str,
-        format: OutputFormat,
-        output_path: &Path,
-        date_range: &DateRange,
-        chunk_size: Option<usize>,
-        lines_per_chunk: Option<usize>
+        &self, person_name: &str, format: OutputFormat, output_path: &Path, date_range: &DateRange, chunk_size: Option<f64>,
+        lines_per_chunk: Option<usize>, only_contact: bool,
     ) -> Result<Vec<PathBuf>> {
-        // Get all messages with this person
-        let messages = self.database.get_conversation_with_person(
-            person_name,
-            date_range.start.map(|dt| dt.naive_local()),
-            date_range.end.map(|dt| dt.naive_local()),
-        )?;
+        // Get contact by name
+        let contact = match self.database.get_contact(person_name)? {
+            Some(c) => Contact {
+                name: c.name,
+                phone: c.phone,
+                email: c.email,
+            },
+            None => return Err(TxtHistoryError::ContactNotFound(person_name.to_string())),
+        };
 
+        // Fetch messages
+        let messages = self.fetch_messages(&contact, date_range, only_contact).await?;
+
+        // Return empty Vec if no messages (consistent with Repository implementation)
         if messages.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Convert database messages to the Message format
-        let messages: Vec<Message> = messages
-            .into_iter()
-            .map(|db_msg| Message {
-                content: db_msg.text.unwrap_or_default(),
-                sender: db_msg.sender,
-                timestamp: Local.from_utc_datetime(&db_msg.date_created),
-            })
-            .collect();
-
-        // Determine how to chunk the messages
-        let chunks = if let Some(lines) = lines_per_chunk {
-            // Chunk by number of messages
-            messages
-                .chunks(lines)
-                .map(|chunk| chunk.to_vec())
-                .collect::<Vec<_>>()
-        } else if let Some(size_mb) = chunk_size {
-            // Chunk by approximate size in MB
-            let bytes_per_mb = 1024 * 1024;
-            let target_bytes = size_mb as usize * bytes_per_mb;
-
-            let mut chunks = Vec::new();
-            let mut current_chunk = Vec::new();
-            let mut current_size = 0;
-
-            for msg in messages {
-                // Estimate size of this message (content + metadata)
-                let msg_size = msg.content.len() + msg.sender.len() + 50; // 50 bytes for timestamp and formatting
-
-                if current_size + msg_size > target_bytes && !current_chunk.is_empty() {
-                    chunks.push(current_chunk);
-                    current_chunk = Vec::new();
-                    current_size = 0;
-                }
-
-                current_chunk.push(msg);
-                current_size += msg_size;
-            }
-
-            if !current_chunk.is_empty() {
-                chunks.push(current_chunk);
-            }
-
-            chunks
-        } else {
-            // No chunking, just one file
-            vec![messages]
-        };
-
-        // Create output files for each chunk
+        // Create output files
         let mut output_files = Vec::new();
 
+        // Use shared chunking utilities
+        let chunks = if let Some(size) = chunk_size {
+            chunk_by_size(&messages, size)
+        } else if let Some(lines) = lines_per_chunk {
+            chunk_by_lines(&messages, lines)
+        } else {
+            vec![messages] // No chunking
+        };
+
+        // Save each chunk
         for (i, chunk) in chunks.iter().enumerate() {
-            let chunk_number = i + 1;
-            let file_stem = output_path.file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("conversation");
+            let file_name = format!("chunk_{}.{}", i + 1, format.extension());
+            let file_path = output_path.join(file_name);
 
-            let file_name = if chunks.len() > 1 {
-                format!("{}_chunk_{}", file_stem, chunk_number)
-            } else {
-                file_stem.to_string()
-            };
-
-            // Create both TXT and CSV files
-            let txt_path = output_path.with_file_name(format!("{}.txt", file_name));
-            let csv_path = output_path.with_file_name(format!("{}.csv", file_name));
-
-            // Format and save the messages
-            self.save_messages(chunk, OutputFormat::Txt, &txt_path).await?;
-            self.save_messages(chunk, OutputFormat::Csv, &csv_path).await?;
-
-            output_files.push(txt_path);
-            output_files.push(csv_path);
+            self.save_messages(chunk, format, &file_path).await?;
+            output_files.push(file_path);
         }
 
         Ok(output_files)

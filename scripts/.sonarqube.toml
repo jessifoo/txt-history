@@ -1,0 +1,7 @@
+# SonarQube configuration file
+
+# No disabled rules - we want to maintain high code quality
+[sonar]
+disable = [
+    # Cognitive complexity warnings are kept to encourage better code structure
+]
