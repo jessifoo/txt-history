@@ -1,13 +1,17 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use chrono::NaiveDateTime;
-use std::fs;
-use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 use tokio::runtime::Runtime;
-
 // Import the necessary modules from the crate
 use txtHistoryRust::db::Database;
-use txtHistoryRust::models::{Contact, DateRange, DbContact, DbMessage, Message, NewContact, NewMessage, OutputFormat};
-use txtHistoryRust::repository::{IMessageDatabaseRepo, MessageRepository};
+use txtHistoryRust::{
+    models::{Contact, DateRange, DbContact, DbMessage, Message, NewContact, NewMessage, OutputFormat},
+    repository::{IMessageDatabaseRepo, MessageRepository},
+};
 
 #[test]
 fn test_export_conversation_by_person() {
@@ -64,7 +68,11 @@ fn test_export_conversation_by_person() {
     // Message from Jess to Phil
     let message2 = NewMessage {
         imessage_id: "test2".to_string(),
-        text: Some("When she's healthy, she doesn't wake up, I don't know if she's getting sick, but in general let her work on falling back to sleep herself. Robert and Roxanne did it, I'm sure we can too".to_string()),
+        text: Some(
+            "When she's healthy, she doesn't wake up, I don't know if she's getting sick, but in general let her work on falling back to \
+             sleep herself. Robert and Roxanne did it, I'm sure we can too"
+                .to_string(),
+        ),
         sender: "Jess".to_string(),
         is_from_me: true,
         date_created: timestamp2,
@@ -100,7 +108,9 @@ fn test_export_conversation_by_person() {
 
     impl MockRepo {
         fn new(db: Database) -> Self {
-            Self { db }
+            Self {
+                db,
+            }
         }
     }
 
@@ -170,7 +180,10 @@ fn test_export_conversation_by_person() {
         fs::create_dir_all(&output_dir).expect("Failed to create output directory");
 
         let repo = MockRepo::new(db);
-        let date_range = DateRange { start: None, end: None };
+        let date_range = DateRange {
+            start: None,
+            end: None,
+        };
 
         let output_path = output_dir.join("phil_conversation");
         let result = repo

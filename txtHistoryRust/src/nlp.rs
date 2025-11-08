@@ -1,14 +1,16 @@
-use anyhow::{Context, Result};
+use std::collections::HashSet;
+
 use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use stop_words::{LANGUAGE, get};
 use unicode_normalization::UnicodeNormalization;
 use whatlang::{Lang, detect};
 
-use crate::db::Database;
-use crate::models::{DbMessage, DbProcessedMessage, NamedEntity, NewProcessedMessage, NlpAnalysis};
+use crate::{
+    db::Database,
+    error::{Result, TxtHistoryError},
+    models::{DbProcessedMessage, NamedEntity, NlpAnalysis},
+};
 
 /// NLP processor for text analysis
 pub struct NlpProcessor {
@@ -199,7 +201,6 @@ impl NlpProcessor {
     /// Process a batch of messages and store results in the database
     pub fn process_messages(&self, db: &Database, message_ids: &[i32]) -> Result<Vec<DbProcessedMessage>> {
         let mut processed_messages = Vec::new();
-        let conn = &mut db.get_connection()?;
 
         for &message_id in message_ids {
             // Check if message has already been processed with this version
@@ -212,7 +213,7 @@ impl NlpProcessor {
             // Get the message from the database
             let message = db
                 .get_message_by_id(message_id)?
-                .context(format!("Message with ID {} not found", message_id))?;
+                .ok_or_else(|| TxtHistoryError::Other(format!("Message with ID {} not found", message_id)))?;
 
             // Skip messages without text
             if message.text.is_none() {

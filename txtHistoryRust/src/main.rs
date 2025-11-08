@@ -1,19 +1,27 @@
 mod db;
+mod error;
+mod file_writer;
 mod models;
 mod nlp;
 mod repository;
 mod schema;
+mod utils;
 
-use anyhow::{Context, Result};
-use chrono::{DateTime, Local, NaiveDateTime};
-use clap::{Parser, Subcommand};
-use imessage_database::util::dirs;
-use repository::IMessageDatabaseRepo;
 use std::path::PathBuf;
 
-use crate::db::Database;
-use crate::models::{Contact, DateRange, OutputFormat};
-use crate::nlp::NlpProcessor;
+use chrono::{DateTime, Local};
+use clap::{Parser, Subcommand};
+use imessage_database::util::dirs;
+
+use crate::{
+    db::Database,
+    error::{Result, TxtHistoryError},
+    file_writer::{write_messages_to_file, write_messages_to_timestamped_dir},
+    models::{Contact, DateRange, OutputFormat},
+    nlp::NlpProcessor,
+    repository::IMessageDatabaseRepo,
+    utils::{chunk_by_lines, chunk_by_size},
+};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -26,24 +34,20 @@ struct Cli {
 enum Commands {
     /// Import messages from iMessage database
     Import {
-        /// Name of the contact
-        #[arg(short, long)]
+        /// Name of the contact (default: "Phil")
+        #[arg(short, long, default_value = "Phil")]
         name: String,
 
         /// Start date for message range (YYYY-MM-DD)
         #[arg(short, long)]
-        start_date: Option<String>,
+        date: Option<String>,
 
         /// End date for message range (YYYY-MM-DD)
-        #[arg(short, long)]
+        #[arg(short = 'e', long)]
         end_date: Option<String>,
 
-        /// Output format (txt or csv)
-        #[arg(short, long, default_value = "txt")]
-        format: String,
-
         /// Size of each chunk in MB
-        #[arg(short, long)]
+        #[arg(short = 's', long)]
         size: Option<f64>,
 
         /// Number of lines per chunk
@@ -52,7 +56,11 @@ enum Commands {
 
         /// Output directory
         #[arg(short, long, default_value = "./output")]
-        output_dir: String,
+        output: Option<String>,
+
+        /// Export only the contact's messages, excluding your replies
+        #[arg(long)]
+        one_side: bool,
     },
     /// Query messages from the database
     Query {
@@ -151,13 +159,13 @@ async fn main() -> Result<()> {
     match &cli.command {
         Commands::Import {
             name,
-            start_date,
+            date,
             end_date,
-            format,
             size,
             lines,
-            output_dir,
-        } => import_messages(name, start_date, end_date, format, *size, *lines, output_dir).await?,
+            output,
+            one_side,
+        } => import_messages(name, date, end_date, size, *lines, output.as_deref(), *one_side).await?,
         Commands::Query {
             name,
             start_date,
@@ -188,13 +196,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Import messages from iMessage database
+/// Import messages from iMessage database (matches Python script behavior)
 async fn import_messages(
-    name: &str, start_date: &Option<String>, end_date: &Option<String>, format: &str, size: Option<f64>, lines: Option<usize>,
-    output_dir: &str,
+    name: &str, date: &Option<String>, end_date: &Option<String>, size: Option<f64>, lines: Option<usize>, output_dir: Option<&str>,
+    only_contact: bool,
 ) -> Result<()> {
     // Get iMessage database path
-    let chat_db_path = dirs::get_imessage_chat_db_path().context("Failed to locate iMessage database")?;
+    let chat_db_path =
+        dirs::get_chat_db().map_err(|e| TxtHistoryError::IMessageDatabase(format!("Failed to locate iMessage database: {}", e)))?;
 
     println!("Using iMessage database at: {}", chat_db_path.display());
 
@@ -202,30 +211,65 @@ async fn import_messages(
     let repo = IMessageDatabaseRepo::new(chat_db_path)?;
 
     // Parse date range
-    let date_range = parse_date_range(start_date, end_date)?;
+    let date_range = parse_date_range(date, end_date)?;
 
     // Get contact information
     let contact = get_contact_info(name)?;
 
-    // Parse output format
-    let output_format = match format.to_lowercase().as_str() {
-        "txt" => OutputFormat::Txt,
-        "csv" => OutputFormat::Csv,
-        "json" => OutputFormat::Json,
-        _ => {
-            println!("Invalid format: {}. Using txt as default.", format);
-            OutputFormat::Txt
-        },
-    };
-
     // Fetch messages
     println!("Fetching messages for contact: {}", contact.name);
-    let messages = repo.fetch_messages(&contact, &date_range).await?;
+    let mut messages = repo.fetch_messages(&contact, &date_range, only_contact).await?;
+
+    // Ensure messages are sorted chronologically (ascending)
+    messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
     println!("Found {} messages", messages.len());
 
-    // Write messages to files
-    write_messages_to_files(&messages, output_format, size, lines, output_dir)?;
+    if messages.is_empty() {
+        println!("No messages found for {} in the specified date range", contact.name);
+        return Ok(());
+    }
 
+    // Determine output directory
+    let output_path = output_dir.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("./output"));
+
+    // Generate timestamp for directory structure
+    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+
+    // Chunk messages
+    let chunks = if let Some(size_mb) = size {
+        chunk_by_size(&messages, size_mb)
+    } else if let Some(lines_count) = lines {
+        chunk_by_lines(&messages, lines_count)
+    } else {
+        vec![messages] // No chunking
+    };
+
+    println!("Writing {} chunks", chunks.len());
+
+    // Write chunks to timestamped directories (matching Python structure)
+    let mut all_files = Vec::new();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let chunk_num = i + 1;
+
+        // Write TXT format
+        let txt_dir = output_path.join(&timestamp).join("chunks_txt");
+        std::fs::create_dir_all(&txt_dir)?;
+        let txt_file = txt_dir.join(format!("chunk_{}.txt", chunk_num));
+        write_messages_to_file(chunk, OutputFormat::Txt, &txt_file)?;
+        all_files.push(txt_file.clone());
+        println!("Wrote {} messages to {}", chunk.len(), txt_file.display());
+
+        // Write CSV format
+        let csv_dir = output_path.join(&timestamp).join("chunks_csv");
+        std::fs::create_dir_all(&csv_dir)?;
+        let csv_file = csv_dir.join(format!("chunk_{}.csv", chunk_num));
+        write_messages_to_file(chunk, OutputFormat::Csv, &csv_file)?;
+        all_files.push(csv_file.clone());
+        println!("Wrote {} messages to {}", chunk.len(), csv_file.display());
+    }
+
+    println!("Export complete! Files written to: {}", output_path.join(&timestamp).display());
     Ok(())
 }
 
@@ -287,7 +331,7 @@ async fn export_conversation_by_person(
     let output_path = std::path::Path::new(output_dir);
 
     // Create repository
-    let repo = repository::Repository::new(db.clone());
+    let repo = crate::repository::Repository::new(db.clone());
 
     // Export conversation
     println!("Exporting conversation with: {}", name);
@@ -325,7 +369,7 @@ fn process_messages(
         // Get contact
         let contact_info = match db.get_contact(contact_name)? {
             Some(contact) => contact,
-            None => return Err(anyhow::anyhow!("Contact not found: {}", contact_name)),
+            None => return Err(TxtHistoryError::ContactNotFound(format!("Contact not found: {}", contact_name))),
         };
 
         println!("Processing messages for: {}", contact_info.name);
@@ -374,7 +418,8 @@ fn process_messages(
 /// Get contact information by name
 fn get_contact_info(name: &str) -> Result<Contact> {
     // For now, we'll just create a contact with the given name
-    // In a real application, you might look up the contact in an address book
+    // TODO: Implement contact store with JSON persistence (like Python's
+    // ContactStore)
     let contact = match name {
         "Jess" => Contact {
             name: "Jess".to_string(),
@@ -402,10 +447,10 @@ fn get_contact_info(name: &str) -> Result<Contact> {
             email: None,
         },
         _ => {
-            return Err(anyhow::anyhow!(
+            return Err(TxtHistoryError::ContactNotFound(format!(
                 "Contact not found: {}. Available contacts: Jess, Phil, Robert, Rhonda, Sherry",
                 name
-            ));
+            )));
         },
     };
 
@@ -417,7 +462,7 @@ fn parse_date_range(start_date: &Option<String>, end_date: &Option<String>) -> R
     let start = if let Some(date_str) = start_date {
         Some(
             DateTime::parse_from_str(&format!("{} 00:00:00 +0000", date_str), "%Y-%m-%d %H:%M:%S %z")
-                .context("Invalid start date format, use YYYY-MM-DD")?
+                .map_err(|e| TxtHistoryError::InvalidDate(format!("Invalid start date format, use YYYY-MM-DD: {}", e)))?
                 .with_timezone(&Local),
         )
     } else {
@@ -427,46 +472,52 @@ fn parse_date_range(start_date: &Option<String>, end_date: &Option<String>) -> R
     let end = if let Some(date_str) = end_date {
         Some(
             DateTime::parse_from_str(&format!("{} 23:59:59 +0000", date_str), "%Y-%m-%d %H:%M:%S %z")
-                .context("Invalid end date format, use YYYY-MM-DD")?
+                .map_err(|e| TxtHistoryError::InvalidDate(format!("Invalid end date format, use YYYY-MM-DD: {}", e)))?
                 .with_timezone(&Local),
         )
     } else {
         None
     };
 
-    Ok(DateRange { start, end })
+    // Validate that start < end if both are provided
+    if let (Some(start_dt), Some(end_dt)) = (&start, &end) {
+        if start_dt > end_dt {
+            return Err(TxtHistoryError::InvalidDate(format!(
+                "Start date ({}) must be before end date ({})",
+                start_dt.format("%Y-%m-%d"),
+                end_dt.format("%Y-%m-%d")
+            )));
+        }
+    }
+
+    Ok(DateRange {
+        start,
+        end,
+    })
 }
 
-/// Write messages to files with chunking
+/// Write messages to files with chunking (legacy function, kept for
+/// compatibility)
 fn write_messages_to_files(
-    messages: &[models::Message], format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>, output_dir: &str,
+    messages: &[crate::models::Message], format: OutputFormat, size_mb: Option<f64>, lines_per_chunk: Option<usize>, output_dir: &str,
 ) -> Result<()> {
     if messages.is_empty() {
         println!("No messages to write");
         return Ok(());
     }
 
-    // Determine chunking strategy
-    let chunk_size = if let Some(size) = size_mb {
-        // Estimate bytes per message and calculate chunk size
-        let avg_msg_size = messages
-            .iter()
-            .map(|m| m.content.len() + m.sender.len() + 50) // Add some overhead for formatting
-            .sum::<usize>() as f64
-            / messages.len() as f64;
+    // Create output directory if it doesn't exist
+    std::fs::create_dir_all(output_dir)?;
 
-        let bytes_per_mb = 1024.0 * 1024.0;
-        let msgs_per_chunk = (size * bytes_per_mb / avg_msg_size).ceil() as usize;
-        msgs_per_chunk.max(1) // Ensure at least one message per chunk
+    // Chunk messages using shared utilities
+    let chunks = if let Some(size) = size_mb {
+        chunk_by_size(messages, size)
     } else if let Some(lines) = lines_per_chunk {
-        lines
+        chunk_by_lines(messages, lines)
     } else {
-        // Default to all messages in one file
-        messages.len()
+        vec![messages.to_vec()] // No chunking
     };
 
-    // Create chunks
-    let chunks: Vec<_> = messages.chunks(chunk_size).collect();
     println!("Writing {} chunks", chunks.len());
 
     // Process each chunk
@@ -477,97 +528,21 @@ fn write_messages_to_files(
         match format {
             OutputFormat::Txt => {
                 let file_path = format!("{}.txt", file_base);
-                write_txt_file(chunk, &file_path)?;
+                write_messages_to_file(chunk, format, std::path::Path::new(&file_path))?;
                 println!("Wrote {} messages to {}", chunk.len(), file_path);
             },
             OutputFormat::Csv => {
                 let file_path = format!("{}.csv", file_base);
-                write_csv_file(chunk, &file_path)?;
+                write_messages_to_file(chunk, format, std::path::Path::new(&file_path))?;
                 println!("Wrote {} messages to {}", chunk.len(), file_path);
             },
             OutputFormat::Json => {
                 let file_path = format!("{}.json", file_base);
-                write_json_file(chunk, &file_path)?;
+                write_messages_to_file(chunk, format, std::path::Path::new(&file_path))?;
                 println!("Wrote {} messages to {}", chunk.len(), file_path);
             },
         }
     }
-
-    Ok(())
-}
-
-/// Write messages to a text file
-fn write_txt_file(messages: &[models::Message], file_path: &str) -> Result<()> {
-    use std::fs::File;
-    use std::io::{BufWriter, Write};
-
-    let file = File::create(file_path)?;
-    let mut writer = BufWriter::new(file);
-
-    for message in messages {
-        writeln!(
-            writer,
-            "{}, {}, {}\n",
-            message.sender,
-            message.timestamp.format("%b %d, %Y %r"),
-            message.content
-        )?;
-    }
-
-    Ok(())
-}
-
-/// Write messages to a CSV file
-fn write_csv_file(messages: &[models::Message], file_path: &str) -> Result<()> {
-    use std::fs::File;
-    use std::io::BufWriter;
-
-    let file = File::create(file_path)?;
-    let mut writer = csv::Writer::from_writer(BufWriter::new(file));
-
-    // Write header
-    writer.write_record(&["Sender", "Timestamp", "Content"])?;
-
-    // Write data
-    for message in messages {
-        writer.write_record(&[
-            &message.sender,
-            &message.timestamp.format("%b %d, %Y %r").to_string(),
-            &message.content,
-        ])?;
-    }
-
-    writer.flush()?;
-    Ok(())
-}
-
-/// Write messages to a JSON file
-fn write_json_file(messages: &[models::Message], file_path: &str) -> Result<()> {
-    use std::fs::File;
-    use std::io::Write;
-
-    let file = File::create(file_path)?;
-    let mut writer = std::io::BufWriter::new(file);
-
-    let json_messages: Vec<_> = messages
-        .iter()
-        .map(|m| {
-            serde_json::json!({
-                "sender": m.sender,
-                "timestamp": m.timestamp.format("%b %d, %Y %r").to_string(),
-                "content": m.content,
-            })
-        })
-        .collect();
-
-    writeln!(writer, "[")?;
-    for (i, json_message) in json_messages.iter().enumerate() {
-        if i > 0 {
-            writeln!(writer, ",")?;
-        }
-        writeln!(writer, "{}", json_message)?;
-    }
-    writeln!(writer, "]")?;
 
     Ok(())
 }

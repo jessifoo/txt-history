@@ -1,7 +1,5 @@
 # Clippy configuration - thresholds and options
 
-allow-unused-imports = true
-
 # Complexity thresholds
 cognitive-complexity-threshold = 15
 type-complexity-threshold = 250

@@ -1,5 +1,6 @@
 // Schema definitions for database tables
-// This file replaces the auto-generated diesel schema with rusqlite-compatible table definitions
+// This file replaces the auto-generated diesel schema with rusqlite-compatible
+// table definitions
 
 // These constants represent table and column names for use with rusqlite
 pub mod contacts {

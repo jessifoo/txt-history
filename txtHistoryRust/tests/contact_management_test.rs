@@ -1,8 +1,7 @@
-use chrono::NaiveDateTime;
-use std::fs;
-use std::path::Path;
-use tempfile::tempdir;
+use std::{fs, path::Path};
 
+use chrono::NaiveDateTime;
+use tempfile::tempdir;
 // Import the necessary modules from the crate
 use txtHistoryRust::db::Database;
 use txtHistoryRust::models::{DbContact, DbMessage, NewContact, NewMessage};
